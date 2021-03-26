@@ -1,0 +1,39 @@
+#ifndef PKTBURST_CORE_WRITE_H
+#define PKTBURST_CORE_WRITE_H
+
+#include <stdbool.h>
+#include <stdint.h>
+
+#include <rte_mempool.h>
+#include <rte_mbuf.h>
+#include <rte_atomic.h>
+
+
+#define PKTBURST_OUTPUT_FILE_LENGTH 100
+#define PKTBURST_WRITE_BURST_SIZE 256
+
+struct tx_core_stats {
+    uint64_t packets;
+    uint64_t bytes;
+    uint64_t drop;
+};
+
+struct tx_core_config {
+    char *filename;
+    bool volatile *stop_condition;
+    struct rte_mempool *pool;
+    struct rte_mbuf **mbufs;
+    rte_atomic16_t *core_counter;
+    uint32_t nbruns;
+    uint32_t nb_pkts;
+    uint16_t burst_size;
+    int core_id;
+    uint16_t port;
+    uint16_t queue_min;
+    uint16_t queue_num;
+    struct tx_core_stats stats;
+};
+
+int tx_core(struct tx_core_config *config);
+
+#endif
