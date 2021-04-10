@@ -24,6 +24,7 @@ struct tx_core_config {
     struct rte_mempool *pool;
     struct rte_mbuf **mbufs;
     rte_atomic16_t *core_counter;
+    uint32_t link_speed;
     uint32_t nbruns;
     uint32_t nb_pkts;
     uint32_t core_id;

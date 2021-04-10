@@ -64,25 +64,22 @@ double timespec_diff_to_double(const struct timespec start, const struct timespe
     return (duration);
 }
 
-static int print_stats(struct stats_config *config, uint16_t port)
+static void print_port_stats(struct stats_config *config, uint16_t port)
 {
     printf("-- PORT %u --\n", port);
     struct rte_eth_stats port_stats;
-    struct rte_eth_link eth_link;
-
     rte_eth_stats_get(port, &port_stats);
-    rte_eth_link_get(port, &eth_link);
 
     double avg_bytes = port_stats.opackets ? (int)((float)port_stats.obytes / (float)port_stats.opackets) : 0;
 
     printf("\tBuilt-in counters:\n" \
-            "\tTX Successful packets: %lu\n" \
-            "\tTX Successful bytes: %s (avg: %.2lf bytes/pkt)\n" \
-            "\tTX Unsuccessful packets: %lu\n",
-                port_stats.opackets,
-                bytes_format(port_stats.obytes),
-                avg_bytes,
-                port_stats.oerrors);
+        "\tTX Successful packets: %lu\n" \
+        "\tTX Successful bytes: %s (avg: %.2lf bytes/pkt)\n" \
+        "\tTX Unsuccessful packets: %lu\n",
+            port_stats.opackets,
+            bytes_format(port_stats.obytes),
+            avg_bytes,
+            port_stats.oerrors);
 
     struct tx_core_stats tx_stats;
     memset(&tx_stats, 0, sizeof(struct tx_core_stats));
@@ -114,7 +111,8 @@ static int print_stats(struct stats_config *config, uint16_t port)
         double seconds = timespec_diff_to_double(config->start_, config->end_);
         double pps = (tx_stats.packets - config->last_packets_) / seconds;
         double bps = (tx_stats.bytes - config->last_bytes_) / seconds;
-        double line_rate = eth_link.link_speed * 1000 * 1000.0 / 8 / (avg_bytes + 8 + 12);
+        uint32_t link_speed = config->tx_core_config_list[0].link_speed;
+        double line_rate = link_speed * 1000 * 1000.0 / 8 / (avg_bytes + 8 + 12);
         config->last_packets_ = tx_stats.packets;
         config->last_bytes_ = tx_stats.bytes;
         config->start_ = config->end_;
@@ -127,7 +125,19 @@ static int print_stats(struct stats_config *config, uint16_t port)
             ps_format(bps, bps_buf, BUF_LEN),
             ps_format(line_rate, line_rate_buf, BUF_LEN));
     }
-    return 0;
+}
+
+static void print_stats(struct stats_config *config)
+{
+    printf("\e[1;1H\e[2J");
+    printf("=== Packet burst statistics %c ===\n", ROTATING_CHAR[nb_stat_update++ % 4]);
+    uint16_t port;
+    RTE_ETH_FOREACH_DEV(port) {
+        if ((1ULL << port) & config->portmask) {
+            print_port_stats(config, port);
+        }
+    }
+    printf("===================================\n\n");
 }
 
 
@@ -139,19 +149,11 @@ void start_stats_display(struct stats_config *config)
                 strerror(errno));
     }
     for (;;) {
-        uint16_t port;
-        RTE_ETH_FOREACH_DEV(port) {
-            if ((1ULL << port) & config->portmask) {
-                printf("\e[1;1H\e[2J");
-                printf("=== Packet burst statistics %c ===\n", ROTATING_CHAR[nb_stat_update++ % 4]);
-                print_stats(config, port);
-                printf("===================================\n\n");
-            }
-        }
         if (unlikely(*(config->stop_condition) ||
                     rte_atomic16_read(config->core_counter) == 0)) {
             break;
         }
+        print_stats(config);
         rte_delay_ms(config->interval);
     }
 }
