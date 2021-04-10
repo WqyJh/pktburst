@@ -19,7 +19,7 @@ struct stats_config {
     uint64_t last_bytes_;
     uint64_t last_drop_;
     uint16_t txq;
-    int nb_tx_cores;
+    uint16_t nb_tx_cores;
     struct timespec start_, end_;
 };
 

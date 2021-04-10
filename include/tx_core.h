@@ -26,8 +26,10 @@ struct tx_core_config {
     rte_atomic16_t *core_counter;
     uint32_t nbruns;
     uint32_t nb_pkts;
+    uint32_t core_id;
+    uint32_t pos_;
+    uint32_t diff_;
     uint16_t burst_size;
-    int core_id;
     uint16_t port;
     uint16_t queue_min;
     uint16_t queue_num;

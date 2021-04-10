@@ -52,7 +52,7 @@
 #define NB_TX_CORES_DEFAULT 1
 #define NB_TX_DESCS_DEFAULT 512
 #define NB_BURST_SIZE_DEFAULT 64
-#define NUM_MBUFS_DEFAULT 262144
+#define NUM_MBUFS_DEFAULT 65536
 #define STATS_INTERVAL_DEFAULT 1000
 #define FILENAME_DEFAULT ""
 #define TXQ_PER_CORE_DEFAULT 4
@@ -470,9 +470,7 @@ int main(int argc, char *argv[]) {
 
     // Finalize
     rte_free(tx_core_config_list);
-    for (int i = 0; i < nb_pkts; i++) {
-        rte_pktmbuf_free(mbufs[i]);
-    }
+    rte_pktmbuf_free_bulk(mbufs, nb_pkts);
     rte_free(mbufs);
     rte_mempool_free(mbuf_pool);
     rte_eal_cleanup();
