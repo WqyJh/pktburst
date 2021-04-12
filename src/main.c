@@ -3,8 +3,6 @@
  */
 
 #include <argp.h>
-#include <generic/rte_atomic.h>
-#include <linux/limits.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -25,7 +23,6 @@
 #include <rte_version.h>
 #include <rte_hash.h>
 
-#include <strings.h>
 #include <tx_core.h>
 #include <statistics.h>
 #include <pcap.h>
@@ -55,7 +52,7 @@
 #define NUM_MBUFS_DEFAULT 65536
 #define STATS_INTERVAL_DEFAULT 1000
 #define FILENAME_DEFAULT ""
-#define TXQ_PER_CORE_DEFAULT 4
+#define TXQ_PER_CORE_DEFAULT 1
 #define CORES_PER_PORT_DEFAULT 1
 #define NB_RUNS_DEFAULT 1
 
@@ -151,8 +148,7 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
 
 static int port_init(uint8_t port, uint16_t rx_rings, uint16_t tx_rings,
                      uint16_t num_rxdesc, uint16_t num_txdesc,
-                     struct rte_mempool *mbuf_pool,
-                     uint32_t *link_speed) {
+                     struct rte_mempool *mbuf_pool) {
     struct rte_eth_conf port_conf = {
         .txmode = {
             .mq_mode = ETH_MQ_TX_NONE,  // Multi queue packet routing mode.
@@ -290,19 +286,6 @@ static int port_init(uint8_t port, uint16_t rx_rings, uint16_t tx_rings,
             port, addr.addr_bytes[0], addr.addr_bytes[1], addr.addr_bytes[2],
             addr.addr_bytes[3], addr.addr_bytes[4], addr.addr_bytes[5],
             num_rxdesc, num_txdesc);
-
-    /* Get link status and display it. */
-    struct rte_eth_link eth_link;
-    rte_eth_link_get(port, &eth_link);
-    if (eth_link.link_status) {
-        RTE_LOG(INFO, PKTBURST, "Link up - speed %u Mbps - %s\n",
-               eth_link.link_speed,
-               (eth_link.link_duplex == ETH_LINK_FULL_DUPLEX) ?
-               "full-duplex" : "half-duplex\n");
-    } else {
-        RTE_LOG(INFO, PKTBURST, "Link down\n");
-    }
-    *link_speed = eth_link.link_speed;
     return 0;
 }
 
@@ -405,12 +388,28 @@ int main(int argc, char *argv[]) {
     rte_atomic16_init(&core_counter);
     int core_index = rte_get_next_lcore(-1, true, 0);
     int tx_core_idx = 0;
+
     RTE_ETH_FOREACH_DEV(port) {
         if (!((1ULL << port) & arguments.portmask)) continue;
-        uint32_t link_speed;
-        int ret = port_init(port, 0, nb_txq, 0, arguments.txd, mbuf_pool, &link_speed);
+        int ret = port_init(port, 0, nb_txq, 0, arguments.txd, mbuf_pool);
         if (ret) {
             rte_exit(EXIT_FAILURE, "Cannot init port %" PRIu8 "\n", port);
+        }
+    }
+
+    RTE_ETH_FOREACH_DEV(port) {
+        if (!((1ULL << port) & arguments.portmask)) continue;
+
+        /* Get link status and display it. */
+        struct rte_eth_link eth_link;
+        rte_eth_link_get(port, &eth_link);
+        if (eth_link.link_status) {
+            RTE_LOG(INFO, PKTBURST, "Link up - speed %u Mbps - %s\n",
+                eth_link.link_speed,
+                (eth_link.link_duplex == ETH_LINK_FULL_DUPLEX) ?
+                "full-duplex" : "half-duplex\n");
+        } else {
+            RTE_LOG(INFO, PKTBURST, "Link down\n");
         }
 
         uint16_t qid = 0;
@@ -419,7 +418,7 @@ int main(int argc, char *argv[]) {
             // Config core
             struct tx_core_config *config = &tx_core_config_list[tx_core_idx++];
             config->stop_condition = &should_stop;
-            config->link_speed = link_speed;
+            config->link_speed = eth_link.link_speed;
             config->core_id = core_index;
             config->filename = arguments.filename;
             config->pool = mbuf_pool;
@@ -471,8 +470,8 @@ int main(int argc, char *argv[]) {
     rte_eal_mp_wait_lcore();
 
     // Finalize
+    rte_pktmbuf_free_bulk(mbufs, tx_core_config_list[0].nb_pkts);
     rte_free(tx_core_config_list);
-    rte_pktmbuf_free_bulk(mbufs, nb_pkts);
     rte_free(mbufs);
     rte_mempool_free(mbuf_pool);
     rte_eal_cleanup();

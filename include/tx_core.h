@@ -29,7 +29,8 @@ struct tx_core_config {
     uint32_t nb_pkts;
     uint32_t core_id;
     uint32_t pos_;
-    uint32_t diff_;
+    uint32_t batch_;
+    uint32_t nb_pkts_;
     uint16_t burst_size;
     uint16_t port;
     uint16_t queue_min;
