@@ -26,7 +26,7 @@ const char * bytes_unit[] = { "B", "KB", "MB", "GB", "TB" };
 const char * units[] = { "", "K", "M", "G", "T" };
 char result[50];
 
-char * bytes_format(uint64_t bytes) {
+char *bytes_format(uint64_t bytes) {
     int i;
     double converted_bytes = bytes;
     for (i = 0; i < 5 && bytes >= 1024; i++, bytes /= 1024) {
@@ -37,14 +37,14 @@ char * bytes_format(uint64_t bytes) {
     return result;
 }
 
-char *ps_format(double n, char *output, int len) {
+char *kilo_format(double n, char *output, int len) {
     int i = 0;
     double d = n;
-    for (; i < sizeof(units) && n >= 1024; i++, n /= 1024) {
-        d = n / 1024.0;
+    for (; i < sizeof(units) && n >= 1000; i++, n /= 1000) {
+        d = n / 1000.0;
     }
 
-    snprintf(output, len, "%.2f %s", d, units[i]);
+    snprintf(output, len, "%.3f %s", d, units[i]);
     return output;
 }
 
@@ -118,12 +118,11 @@ static void print_port_stats(struct stats_config *config, uint16_t port)
         config->start_ = config->end_;
 #define BUF_LEN 16
         char pps_buf[BUF_LEN];
-        char bps_buf[BUF_LEN];
         char line_rate_buf[BUF_LEN];
         printf("\tspeed\t%spps\t%sbps\tlinerate=%spps\t\n",
-            ps_format(pps, pps_buf, BUF_LEN),
-            ps_format(bps, bps_buf, BUF_LEN),
-            ps_format(line_rate, line_rate_buf, BUF_LEN));
+            kilo_format(pps, pps_buf, BUF_LEN),
+            bytes_format(bps),
+            kilo_format(line_rate, line_rate_buf, BUF_LEN));
     }
 }
 
