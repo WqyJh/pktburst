@@ -301,6 +301,13 @@ static void signal_handler(int sig) {
 
 // ------------------------- Main -------------------------
 
+static inline void copy_mbufs(struct rte_mbuf **dst, struct rte_mbuf **src, int n)
+{
+    for (int i = 0; i < n; i++) {
+        dst[i] = rte_pktmbuf_copy(src[i], src[i]->pool, 0, rte_pktmbuf_pkt_len(src[i]));
+    }
+}
+
 int main(int argc, char *argv[]) {
     signal(SIGINT, signal_handler);
     rte_atomic16_t core_counter;
@@ -309,7 +316,7 @@ int main(int argc, char *argv[]) {
     uint16_t nb_tx_cores = 0;
     unsigned int required_cores;
     struct rte_mempool *mbuf_pool;
-    struct rte_mbuf **mbufs;
+    struct rte_mbuf ***mbufs_list;
     int nb_pkts = 0;
 
     static struct argp argp = {options, parse_opt, args_doc, doc, 0, 0, 0};
@@ -372,11 +379,18 @@ int main(int argc, char *argv[]) {
     if (mbuf_pool == NULL)
         rte_exit(EXIT_FAILURE, "Cannot create mbuf pool\n");
     RTE_LOG(INFO, PKTBURST, "Create MBUF_POOL size=%u\n", arguments.num_mbufs);
-    mbufs = rte_malloc(NULL, sizeof(struct rte_mbuf *) * arguments.num_mbufs, 0);
+    mbufs_list = rte_malloc(NULL, sizeof(struct rte_mbuf **) * nb_ports, 0);
+    for (int i = 0; i < nb_ports; i++) {
+        mbufs_list[i] = rte_zmalloc(NULL, sizeof(struct rte_mbuf *) * arguments.num_mbufs, 0);
+    }
 
-    ret = load_pcap(arguments.filename, mbuf_pool, mbufs, &nb_pkts);
+    ret = load_pcap(arguments.filename, mbuf_pool, mbufs_list[0], &nb_pkts);
     if (ret < 0) {
         rte_exit(EXIT_FAILURE, "Failed to load pcap\n");
+    }
+
+    for (int i = 1; i < nb_ports; i++) {
+        copy_mbufs(mbufs_list[i], mbufs_list[0], nb_pkts);
     }
 
     uint16_t nb_txq = arguments.txq_per_core * arguments.cores_per_port;
@@ -384,11 +398,7 @@ int main(int argc, char *argv[]) {
     // Init stats/config list
     tx_core_config_list = rte_calloc(NULL, 1, sizeof(struct tx_core_config) * nb_tx_cores, 0);
 
-    // Core index
-    rte_atomic16_init(&core_counter);
-    int core_index = rte_get_next_lcore(-1, true, 0);
-    int tx_core_idx = 0;
-
+    // Port Init
     RTE_ETH_FOREACH_DEV(port) {
         if (!((1ULL << port) & arguments.portmask)) continue;
         int ret = port_init(port, 0, nb_txq, 0, arguments.txd, mbuf_pool);
@@ -396,6 +406,11 @@ int main(int argc, char *argv[]) {
             rte_exit(EXIT_FAILURE, "Cannot init port %" PRIu8 "\n", port);
         }
     }
+
+    // Core index
+    rte_atomic16_init(&core_counter);
+    int core_index = rte_get_next_lcore(-1, true, 0);
+    int tx_core_idx = 0;
 
     RTE_ETH_FOREACH_DEV(port) {
         if (!((1ULL << port) & arguments.portmask)) continue;
@@ -413,6 +428,8 @@ int main(int argc, char *argv[]) {
         }
 
         uint16_t qid = 0;
+        uint16_t nb_pkts_per_core = nb_pkts / arguments.cores_per_port;
+        struct rte_mbuf **mbufs = mbufs_list[tx_core_idx];
         // Tx Cores
         for (int i = 0; i < arguments.cores_per_port; i++, qid += arguments.txq_per_core) {
             // Config core
@@ -425,11 +442,15 @@ int main(int argc, char *argv[]) {
             config->port = port;
             config->queue_min = qid;
             config->queue_num = arguments.txq_per_core;
-            config->mbufs = mbufs;
-            config->nb_pkts = nb_pkts;
+            config->mbufs = mbufs + i * nb_pkts_per_core;
+            config->nb_pkts = nb_pkts_per_core;
+            if (i == arguments.cores_per_port - 1) {
+                config->nb_pkts = nb_pkts - i * nb_pkts_per_core;
+            }
             config->nbruns = arguments.nbruns;
             config->core_counter = &core_counter;
             config->burst_size = arguments.burst_size;
+            config->txd = arguments.txd;
             rte_atomic16_inc(&core_counter);
 
             for (uint16_t q = config->queue_min; q < config->queue_min + config->queue_num; q++) {
@@ -470,9 +491,12 @@ int main(int argc, char *argv[]) {
     rte_eal_mp_wait_lcore();
 
     // Finalize
-    rte_pktmbuf_free_bulk(mbufs, tx_core_config_list[0].nb_pkts);
+    for (int i = 0; i < nb_ports; i++) {
+        rte_pktmbuf_free_bulk(mbufs_list[i], nb_pkts);
+        rte_free(mbufs_list[i]);
+    }
+    rte_free(mbufs_list);
     rte_free(tx_core_config_list);
-    rte_free(mbufs);
     rte_mempool_free(mbuf_pool);
     rte_eal_cleanup();
     return 0;

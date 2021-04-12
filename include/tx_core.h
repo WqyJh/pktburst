@@ -24,17 +24,21 @@ struct tx_core_config {
     struct rte_mempool *pool;
     struct rte_mbuf **mbufs;
     rte_atomic16_t *core_counter;
+    struct rte_mbuf **old_mbufs_;
+    uint32_t pkt_prepared_;
     uint32_t link_speed;
     uint32_t nbruns;
     uint32_t nb_pkts;
     uint32_t core_id;
     uint32_t pos_;
     uint32_t batch_;
-    uint32_t nb_pkts_;
+    uint32_t old_nb_pkts_;
+    bool first_run_;
     uint16_t burst_size;
     uint16_t port;
     uint16_t queue_min;
     uint16_t queue_num;
+    uint16_t txd;
     struct tx_core_stats stats;
 };
 

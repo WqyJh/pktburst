@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <rte_atomic.h>
 #include <rte_mempool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -22,7 +23,7 @@
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define RTE_LOGTYPE_TX RTE_LOGTYPE_USER1
-#define EXTEND_PACKETS_THRESH 32
+#define EXTEND_PACKETS_THRESH 128
 
 static inline void modify_inc_ip_n(struct tx_core_config *config, struct rte_mbuf *mbuf, uint32_t n)
 {
@@ -30,18 +31,20 @@ static inline void modify_inc_ip_n(struct tx_core_config *config, struct rte_mbu
     struct rte_ipv4_hdr *ipv4_hdr = (struct rte_ipv4_hdr *)(eth_hdr + 1);
     ipv4_hdr->src_addr += n;
     ipv4_hdr->dst_addr += n;
+    rte_mb();
 }
 
 static inline void extend_packets(struct tx_core_config *config)
 {
-    uint32_t batch = EXTEND_PACKETS_THRESH / config->nb_pkts + 1;
+    uint32_t batch = config->txd * config->queue_num / config->nb_pkts + 1;
     if (batch > config->nbruns) {
         batch = config->nbruns;
     }
     uint32_t old_nb_pkts = config->nb_pkts;
     uint32_t nb_pkts = config->nb_pkts * batch;
-    struct rte_mbuf **mbufs = rte_realloc(config->mbufs, sizeof(struct rte_mbuf *) * nb_pkts, 0);
-    struct rte_mempool *pool = mbufs[0]->pool;
+    struct rte_mbuf **mbufs = rte_malloc(NULL, sizeof(struct rte_mbuf *) * nb_pkts, 0);
+    struct rte_mempool *pool = config->mbufs[0]->pool;
+    rte_memcpy(mbufs, config->mbufs, sizeof(struct rte_mbuf *) * old_nb_pkts);
     for (int i = 1; i < batch; i++) {
         for (int j = 0; j < old_nb_pkts; j++) {
             struct rte_mbuf *old = mbufs[j];
@@ -52,17 +55,18 @@ static inline void extend_packets(struct tx_core_config *config)
     }
     config->batch_ = batch;
     config->nb_pkts = nb_pkts;
-    config->nb_pkts_ = old_nb_pkts;
+    config->old_nb_pkts_ = old_nb_pkts;
+    config->old_mbufs_ = config->mbufs;
     config->mbufs = mbufs;
 }
 
-static inline uint16_t prepare_packets(struct tx_core_config *config, struct rte_mbuf **bufs, uint16_t nb_pkts) 
+static inline uint16_t prepare_small_nb_pkts(struct tx_core_config *config, struct rte_mbuf **bufs, uint16_t nb_pkts) 
 {
     uint16_t n = 0;
 
 #define PREFETCH_NUM 8
     for (int i = 0; i < nb_pkts; i += PREFETCH_NUM) {
-        for (int j = config->pos_; j < nb_pkts && j < config->pos_ + PREFETCH_NUM; j++) {
+        for (int j = config->pos_; j < config->pos_ + PREFETCH_NUM; j++) {
             if (unlikely(j >= config->nb_pkts)) {
                 rte_prefetch0(rte_pktmbuf_mtod(config->mbufs[j - config->nb_pkts], void *));
             } else {
@@ -71,13 +75,19 @@ static inline uint16_t prepare_packets(struct tx_core_config *config, struct rte
         }
         for (int j = i; j < i + PREFETCH_NUM && j < nb_pkts; j++) {
             struct rte_mbuf *mbuf = config->mbufs[config->pos_];
-            modify_inc_ip_n(config, mbuf, config->batch_);
+            if (likely(!config->first_run_)) {
+                modify_inc_ip_n(config, mbuf, config->batch_);
+            }
 
             bufs[n++] = mbuf;
             if (unlikely(++config->pos_ == config->nb_pkts)) {
                 config->pos_ = 0;
-                config->nbruns -= config->batch_;
-                if (config->nbruns == 0) {
+                if (unlikely(config->first_run_))
+                    config->first_run_ = false;
+            }
+            if (unlikely(++config->pkt_prepared_ == config->old_nb_pkts_)) {
+                config->pkt_prepared_ = 0;
+                if (unlikely(--config->nbruns == 0)) {
                     goto end;
                 }
             }
@@ -87,12 +97,61 @@ end:
     return n;
 }
 
+static inline uint16_t prepare_packets(struct tx_core_config *config, struct rte_mbuf **bufs, uint16_t nb_pkts) 
+{
+    uint16_t n = 0;
+
+#define PREFETCH_NUM 8
+    for (int i = 0; i < nb_pkts; i += PREFETCH_NUM) {
+        for (int j = config->pos_; j < config->pos_ + PREFETCH_NUM && n < nb_pkts; j++) {
+            if (unlikely(j >= config->nb_pkts)) {
+                rte_prefetch0(rte_pktmbuf_mtod(config->mbufs[j - config->nb_pkts], void *));
+            } else {
+                rte_prefetch0(rte_pktmbuf_mtod(config->mbufs[j], void *));
+            }
+        }
+        for (int j = i; j < i + PREFETCH_NUM && j < nb_pkts; j++) {
+            struct rte_mbuf *mbuf = config->mbufs[config->pos_];
+            if (likely(!config->first_run_)) {
+                modify_inc_ip_n(config, mbuf, 1);
+            }
+
+            bufs[n++] = mbuf;
+            if (unlikely(++config->pos_ == config->nb_pkts)) {
+                config->pos_ = 0;
+                if (unlikely(config->first_run_))
+                    config->first_run_ = false;
+                if (--config->nbruns == 0) {
+                    goto end;
+                }
+            }
+        }
+    }
+end:
+    return n;
+}
+
+/**
+* Send packets loaded from pcap file for `nbruns` times.
+* Modify packets after each run.
+*
+* small_nb_pkts: packets number less than number of nic descriptors.
+*
+* When packets are more than nic descriptors, an tx bursted mbuf won't
+* be modified by packet preparing because the mbufs might be reused before
+* successfully sent by nic.
+* |1|2|3|4|5|6|7|8|
+*
+* When packets are less than nic descriptors, copy packets to mutiple times
+* each of which called a batch, ensuring the total number of packets are
+* greater than nic descriptors.
+* |1|2|3|4|1|2|3|4|
+**/
 int tx_core(struct tx_core_config *config)
 {
-    if (config->nb_pkts < EXTEND_PACKETS_THRESH) {
+    const bool small_nb_pkts = config->nb_pkts < config->txd * config->queue_num;
+    if (small_nb_pkts) {
         extend_packets(config);
-    } else {
-        config->batch_ = 1;
     }
 
     const uint16_t burst = config->burst_size;
@@ -100,6 +159,7 @@ int tx_core(struct tx_core_config *config)
     struct tx_core_stats *stats = &config->stats;
     int qid = config->queue_min;
     int qmax = config->queue_min + config->queue_num - 1;
+    config->first_run_ = true;
     config->pos_ = 0; // pos to config->mbufs
     uint16_t tail = 0; // pos to bufs
 
@@ -111,11 +171,16 @@ int tx_core(struct tx_core_config *config)
             break;
         }
 
-        uint16_t nb_prepared = prepare_packets(config, bufs + tail, MIN(burst, config->nb_pkts) - tail);
+        uint16_t nb_prepared;
+        if (small_nb_pkts) {
+            nb_prepared = prepare_small_nb_pkts(config, bufs + tail, MIN(burst, config->nb_pkts) - tail);
+        } else {
+            nb_prepared = prepare_packets(config, bufs + tail, MIN(burst, config->nb_pkts) - tail);
+        }
         tail += nb_prepared;
 
         if (unlikely(config->nbruns == 0)) {
-            // Drain the last packets
+            // All packets has been prepared, drain them
             while (tail) {
                 struct rte_mbuf **pos = bufs;
                 uint16_t nb_tx = rte_eth_tx_burst(config->port, qid, pos, tail);
@@ -145,6 +210,11 @@ int tx_core(struct tx_core_config *config)
         } else {
             tail = 0;
         }
+    }
+    if (small_nb_pkts) {
+        rte_free(config->mbufs);
+        config->mbufs = config->old_mbufs_;
+        config->old_mbufs_ = NULL;
     }
     rte_free(bufs);
     rte_atomic16_dec(config->core_counter);
