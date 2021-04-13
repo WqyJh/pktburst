@@ -23,7 +23,7 @@
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define RTE_LOGTYPE_TX RTE_LOGTYPE_USER1
-#define EXTEND_PACKETS_THRESH 128
+#define PREFETCH_NUM 8
 
 static inline void modify_inc_ip_n(struct tx_core_config *config, struct rte_mbuf *mbuf, uint32_t n)
 {
@@ -64,7 +64,6 @@ static inline uint16_t prepare_small_nb_pkts(struct tx_core_config *config, stru
 {
     uint16_t n = 0;
 
-#define PREFETCH_NUM 8
     for (int i = 0; i < nb_pkts; i += PREFETCH_NUM) {
         for (int j = config->pos_; j < config->pos_ + PREFETCH_NUM; j++) {
             if (unlikely(j >= config->nb_pkts)) {
@@ -101,7 +100,6 @@ static inline uint16_t prepare_packets(struct tx_core_config *config, struct rte
 {
     uint16_t n = 0;
 
-#define PREFETCH_NUM 8
     for (int i = 0; i < nb_pkts; i += PREFETCH_NUM) {
         for (int j = config->pos_; j < config->pos_ + PREFETCH_NUM && n < nb_pkts; j++) {
             if (unlikely(j >= config->nb_pkts)) {
