@@ -396,7 +396,7 @@ int main(int argc, char *argv[]) {
     uint16_t nb_txq = arguments.txq_per_core * arguments.cores_per_port;
 
     // Init stats/config list
-    tx_core_config_list = rte_calloc(NULL, 1, sizeof(struct tx_core_config) * nb_tx_cores, 0);
+    tx_core_config_list = rte_zmalloc(NULL, sizeof(struct tx_core_config) * nb_tx_cores, 0);
 
     // Port Init
     RTE_ETH_FOREACH_DEV(port) {
