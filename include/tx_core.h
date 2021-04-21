@@ -26,15 +26,14 @@ struct tx_core_config {
     rte_atomic16_t *core_counter;
     struct rte_mbuf **mbufs_;
     struct rte_mbuf **pkts_;
+    uint64_t nbruns;
+    uint64_t nbruns_;
     uint32_t prepare_off_;
     uint32_t link_speed;
-    uint32_t nbruns;
     uint32_t nb_pkts;
     uint32_t core_id;
     uint32_t batch_;
     uint32_t nb_pkts_;
-    uint32_t nbruns_;
-    bool small_nb_pkts_;
     uint16_t burst_size;
     uint16_t port;
     uint16_t queue_min;

@@ -33,7 +33,7 @@ char *bytes_format(uint64_t bytes) {
         converted_bytes = bytes / 1024.0;
     }
 
-    sprintf(result, "%.2f %s", converted_bytes, bytes_unit[i]);
+    sprintf(result, "%.3f %s", converted_bytes, units[i]);
     return result;
 }
 
@@ -81,27 +81,26 @@ static void print_port_stats(struct stats_config *config, uint16_t port)
             avg_bytes,
             port_stats.oerrors);
 
-    struct tx_core_stats tx_stats;
-    memset(&tx_stats, 0, sizeof(struct tx_core_stats));
+    struct tx_core_stats stats;
+    memset(&stats, 0, sizeof(struct tx_core_stats));
     for (int i = 0; i < config->nb_tx_cores; i++) {
         // Copy stats
         struct tx_core_config *tx_config = &config->tx_core_config_list[i];
         if (tx_config->port != port) continue;
 
-        struct tx_core_stats stats = tx_config->stats;
         // Accumulate stats
-        tx_stats.packets += stats.packets;
-        tx_stats.bytes += stats.bytes;
-        tx_stats.drop += stats.drop;
+        stats.packets += port_stats.q_opackets[i];
+        stats.bytes += port_stats.q_obytes[i];
+        stats.drop += port_stats.q_errors[i];
         // Print stats
-        printf("Tx core %u port %u\n", tx_config->core_id, tx_config->port);
-        printf("\tpackets=%lu\tbytes=%lu\tdrop=%lu\n", stats.packets, stats.bytes, stats.drop);
-        printf("\tQueue %u-%u TX: %lu pkts %lu bytes\n", tx_config->queue_min, tx_config->queue_min + tx_config->queue_num - 1, port_stats.q_opackets[i], port_stats.q_obytes[i]);
+        printf("Tx core %u port %u queue %u-%u\n", tx_config->core_id, tx_config->port,
+            tx_config->queue_min, tx_config->queue_min + tx_config->queue_num - 1);
+        printf("\tpackets=%lu\tbytes=%lu\terror=%lu\n",
+            port_stats.q_opackets[i], port_stats.q_obytes[i], port_stats.q_errors[i]);
     }
     // Print accumulated stats
     printf("Tx core summary\n");
-    printf("\tpackets=%lu\tbytes=%lu\tdrop=%lu\n", tx_stats.packets, tx_stats.bytes, tx_stats.drop);
-    
+    printf("\tpackets=%lu\tbytes=%lu\terror=%lu\n", stats.packets, stats.bytes, stats.drop);
 
     int ret = clock_gettime(CLOCK_TYPE_ID, &config->end_);
     if (unlikely(ret)) {
@@ -109,17 +108,17 @@ static void print_port_stats(struct stats_config *config, uint16_t port)
                 strerror(errno));
     } else {
         double seconds = timespec_diff_to_double(config->start_, config->end_);
-        double pps = (tx_stats.packets - config->last_packets_) / seconds;
-        double bps = (tx_stats.bytes - config->last_bytes_) / seconds;
+        double pps = (stats.packets - config->last_packets_) / seconds;
+        double bps = (stats.bytes - config->last_bytes_) / seconds;
         uint32_t link_speed = config->tx_core_config_list[0].link_speed;
         double line_rate = link_speed * 1000 * 1000.0 / 8 / (avg_bytes + 8 + 12);
-        config->last_packets_ = tx_stats.packets;
-        config->last_bytes_ = tx_stats.bytes;
+        config->last_packets_ = stats.packets;
+        config->last_bytes_ = stats.bytes;
         config->start_ = config->end_;
 #define BUF_LEN 16
         char pps_buf[BUF_LEN];
         char line_rate_buf[BUF_LEN];
-        printf("\tspeed\t%spps\t%sbps\tlinerate=%spps\t\n",
+        printf("\tspeed\t%spps\t%sBps\tlinerate=%spps\t\n",
             kilo_format(pps, pps_buf, BUF_LEN),
             bytes_format(bps),
             kilo_format(line_rate, line_rate_buf, BUF_LEN));

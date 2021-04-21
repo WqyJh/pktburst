@@ -1,5 +1,4 @@
 #include <errno.h>
-
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -24,7 +23,7 @@
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define RTE_LOGTYPE_TX RTE_LOGTYPE_USER1
-#define PREFETCH_NUM 16
+#define PREFETCH_NUM 4
 
 static inline void modify_inc_ip_n(struct tx_core_config *config, struct rte_mbuf *mbuf, uint32_t n)
 {
@@ -64,26 +63,22 @@ static inline void restore_extended_packets(struct tx_core_config *config)
 
 static inline void modify_packet(struct tx_core_config *config, struct rte_mbuf *mbuf)
 {
-    if (config->small_nb_pkts_) {
-        modify_inc_ip_n(config, mbuf, config->batch_);
-    } else {
-        modify_inc_ip_n(config, mbuf, 1);
-    }
+    modify_inc_ip_n(config, mbuf, config->batch_);
 }
 
 static inline void flush_packets(struct tx_core_config *config)
 {
-    struct tx_core_stats *stats = &config->stats;
+    // struct tx_core_stats *stats = &config->stats;
     struct rte_mbuf **pos = config->pkts_;
     uint32_t to_sent = config->off_;
     while (to_sent) {
         uint16_t nb_tx = rte_eth_tx_burst(config->port, config->qid_, pos, config->burst_);
         if (++config->qid_ > config->qmax_) config->qid_ = config->queue_min;
-        // Collect stats
-        stats->packets += nb_tx;
-        for (int i = 0; i < nb_tx; i++) {
-            stats->bytes += rte_pktmbuf_pkt_len(pos[i]);
-        }
+        // // Collect stats
+        // stats->packets += nb_tx;
+        // for (int i = 0; i < nb_tx; i++) {
+        //     stats->bytes += rte_pktmbuf_pkt_len(pos[i]);
+        // }
         // Adjust pos
         to_sent -= nb_tx;
         pos += nb_tx;
@@ -92,7 +87,7 @@ static inline void flush_packets(struct tx_core_config *config)
 
 static inline bool process_packet(struct tx_core_config *config, struct rte_mbuf *mbuf)
 {
-    struct tx_core_stats *stats = &config->stats;
+    // struct tx_core_stats *stats = &config->stats;
 
     // Buffer fulled
     if (config->off_ == config->burst_) {
@@ -102,10 +97,10 @@ static inline bool process_packet(struct tx_core_config *config, struct rte_mbuf
         if (unlikely(nb_tx == 0)) return false;
 
         // Collect stats
-        stats->packets += nb_tx;
-        for (int i = nb_tx; i < config->burst_; i++) {
-            stats->bytes += rte_pktmbuf_pkt_len(config->pkts_[i]);
-        }
+        // stats->packets += nb_tx;
+        // for (int i = nb_tx; i < config->burst_; i++) {
+        //     stats->bytes += rte_pktmbuf_pkt_len(config->pkts_[i]);
+        // }
 
         // Move the unsent packets to front of bufs
         if (nb_tx < config->burst_) {
@@ -150,18 +145,19 @@ static inline bool process_packet(struct tx_core_config *config, struct rte_mbuf
 **/
 int tx_core(struct tx_core_config *config)
 {
-    config->small_nb_pkts_ = config->nb_pkts < config->txd * config->queue_num;
-    if (config->small_nb_pkts_) {
+    const bool small_nb_pkts_ = config->nb_pkts < config->txd * config->queue_num;
+    if (small_nb_pkts_) {
         extend_packets(config);
     } else {
         config->mbufs_ = config->mbufs;
         config->nb_pkts_ = config->nb_pkts;
+        config->batch_ = 1;
     }
 
-    config->burst_ = MIN(config->burst_size, config->nb_pkts);
+    config->burst_ = MIN(config->burst_size, config->nb_pkts_);
     config->pkts_ = (struct rte_mbuf **)rte_malloc(NULL, sizeof(struct rte_mbuf*) * config->burst_, 0);
 
-    struct tx_core_stats *stats = &config->stats;
+    // struct tx_core_stats *stats = &config->stats;
     int qid = config->queue_min;
     int qmax = config->queue_min + config->queue_num - 1;
 
@@ -173,16 +169,20 @@ int tx_core(struct tx_core_config *config)
         if (unlikely(*(config->stop_condition))) {
             break;
         }
-        // Prefetch packets
+
+        // Prefetch packets: quite the same with non prefetch
+        // Prefetch: 11.467 Mpps
+        // Non prefetch: 11.467 Mpps
         if ((i & (PREFETCH_NUM - 1)) == 0) {
-            for (int j = i; j < PREFETCH_NUM; j++) {
-                if (j < config->nb_pkts_) {
+            for (int j = i; j < i + PREFETCH_NUM; j++) {
+                if (likely(j < config->nb_pkts_)) {
                     rte_prefetch0(rte_pktmbuf_mtod(config->mbufs_[j], void *));
                 } else {
                     rte_prefetch0(rte_pktmbuf_mtod(config->mbufs_[j - config->nb_pkts_], void *));
                 }
             }
         }
+
         // Process packets
         bool processed = process_packet(config, config->mbufs_[i]);
         if (unlikely(!processed)) continue;
@@ -195,11 +195,12 @@ int tx_core(struct tx_core_config *config)
         }
     }
 
-    if (config->small_nb_pkts_) {
+    if (small_nb_pkts_) {
         restore_extended_packets(config);
     }
 
+    rte_free(config->pkts_);
     rte_atomic16_dec(config->core_counter);
-    RTE_LOG(INFO, TX, "Tx core %u stopped: %lu pkts sent\n", rte_lcore_id(), stats->packets);
+    RTE_LOG(INFO, TX, "Tx core %u stopped\n", rte_lcore_id());
     return 0;
 }

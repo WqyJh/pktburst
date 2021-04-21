@@ -48,7 +48,7 @@
 #define PORTMASK_DEFAULT 0x1
 #define NB_TX_CORES_DEFAULT 1
 #define NB_TX_DESCS_DEFAULT 512
-#define NB_BURST_SIZE_DEFAULT 64
+#define NB_BURST_SIZE_DEFAULT 512
 #define NUM_MBUFS_DEFAULT 65536
 #define STATS_INTERVAL_DEFAULT 1000
 #define FILENAME_DEFAULT ""
@@ -86,9 +86,9 @@ static struct argp_option options[] = {
 struct arguments {
     char *args[2];
     uint64_t portmask;
+    uint64_t nbruns;
     uint32_t statistics;
     uint32_t num_mbufs;
-    uint32_t nbruns;
     uint16_t txd;
     uint16_t txq_per_core;
     uint16_t cores_per_port;

@@ -16,9 +16,6 @@ endif()
 set(CMAKE_C_FLAGS_DEBUG "$ENV{CFLAGS} -O0 -Wall -g -ggdb")
 set(CMAKE_C_FLAGS_RELEASE "$ENV{CFLAGS} -O3 -Wall")
 
-# Options exposed to the user
-option(PERF "Compile for performance" OFF)
-
 set(ENV{PKG_CONFIG_PATH} "/usr/local/lib/x86_64-linux-gnu/pkgconfig")
 
 find_package(PkgConfig)
