@@ -72,7 +72,7 @@ static inline void flush_packets(struct tx_core_config *config)
     struct rte_mbuf **pos = config->pkts_;
     uint32_t to_sent = config->off_;
     while (to_sent) {
-        uint16_t nb_tx = rte_eth_tx_burst(config->port, config->qid_, pos, config->burst_);
+        uint16_t nb_tx = rte_eth_tx_burst(config->port, config->qid_, pos, to_sent);
         if (++config->qid_ > config->qmax_) config->qid_ = config->queue_min;
         // // Collect stats
         // stats->packets += nb_tx;
