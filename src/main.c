@@ -25,7 +25,6 @@
 
 #include <tx_core.h>
 #include <statistics.h>
-#include <pcap.h>
 
 #define MAX_PKT_BURST 512
 #define MBUF_CACHE_SIZE 256
@@ -300,6 +299,9 @@ static void signal_handler(int sig) {
 }
 
 // ------------------------- Main -------------------------
+
+int load_pcap(const char *filename, struct rte_mempool *pool,
+              struct rte_mbuf **mbufs, int *nb_pkts);
 
 static inline void copy_mbufs(struct rte_mbuf **dst, struct rte_mbuf **src, int n)
 {

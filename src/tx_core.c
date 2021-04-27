@@ -18,7 +18,6 @@
 #include <rte_ip.h>
 #include <rte_ethdev.h>
 
-#include <pcap.h>
 #include <tx_core.h>
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))

@@ -1,6 +1,4 @@
-#include <asm-generic/errno-base.h>
 #include <fcntl.h>
-#include <rte_mbuf.h>
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
@@ -9,131 +7,75 @@
 #include <rte_log.h>
 #include <rte_branch_prediction.h>
 #include <rte_eal.h>
+#include <rte_debug.h>
+#include <rte_mbuf.h>
+#include <rte_memcpy.h>
 
-#include <pcap.h>
-
-#define RTE_LOGTYPE_PCAP RTE_LOGTYPE_USER1
-
-
-void pcap_header_init(struct pcap_header *header, uint32_t snaplen)
-{
-    header->magic = 0xa1b2c3d4;
-    header->major = 0x0002;
-    header->minor = 0x0004;
-    header->thiszone = 0;
-    header->sigfigs = 0;
-    header->snaplen = snaplen;
-    header->linktype = 0x00000001; // Ethernet and Linux loopback
-}
+#include <pcap/pcap.h>
 
 #define RTE_LOGTYPE_PCAP RTE_LOGTYPE_USER1
-
-int open_pcap(const char *fn)
-{
-    int fd;
-    fd = open(fn, O_RDONLY);
-    if (unlikely(fd < 0)) {
-        RTE_LOG(ERR, PCAP, "Failed to open %s: %s\n", fn, strerror(errno));
-    }
-    return fd;
-}
-
-int read_pcap_header(int fd, struct pcap_header *header)
-{
-    int ret = read(fd, header, sizeof(struct pcap_header));
-    if (unlikely(ret < sizeof(struct pcap_header))) {
-        RTE_LOG(ERR, PCAP, "Failed to read pcap file header: %s\n", strerror(errno));
-        return ret;
-    }
-    return 0;
-}
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 
-int read_next_packet(int fd, void *buf, int len)
-{
-    struct pcap_packet_header header;
-    int ret = read(fd, &header, sizeof(struct pcap_packet_header));
-
-    if (unlikely(ret < sizeof(struct pcap_packet_header))) {
-        RTE_LOG(ERR, PCAP, "Failed to read packet header: %s\n", strerror(errno));
-        return ret;
-    }
-    int n = MIN(len, header.packet_length);
-    ret = read(fd, buf, n);
-    if (ret < n) {
-        RTE_LOG(ERR, PCAP, "Failed to read packet content: %s\n", strerror(errno));
-        return -1;
-    }
-    if (len < header.packet_length) { // drop packet longer than len
-        lseek(fd, header.packet_length - len, SEEK_CUR);
-    }
-    return ret;
-}
-
-int close_pcap(int fd)
-{
-    int ret = close(fd);
-    if (unlikely(ret < 0)) {
-        RTE_LOG(ERR, PCAP, "Failed to close file: %s\n", strerror(errno));
-        return ret;
-    }
-    return 0;
-}
 
 int load_pcap(const char *filename, struct rte_mempool *pool,
               struct rte_mbuf **mbufs, int *nb_pkts)
 {
-    int fd = -1;
     int ret = -1;
-    struct pcap_header pcap_header;
+    int n = 0;
 
-    fd = open_pcap(filename);
-
-    if (unlikely(fd < 0)) {
+	char ebuf[PCAP_ERRBUF_SIZE];
+    pcap_t *pcap_file = NULL;
+    pcap_file = pcap_open_offline(filename, ebuf);
+    if (pcap_file == NULL) {
+        fprintf(stderr, "Failed to open pcap file: %s\n", ebuf);
         goto end;
     }
 
-    ret = read_pcap_header(fd, &pcap_header);
-    if (unlikely(ret < 0)) {
-        goto end;
-    }
-
-    int i = 0;
     uint64_t bytes = 0;
     int max_len = 0;
+    struct pcap_pkthdr packet_header;
     while (1) {
         struct rte_mbuf *mbuf = rte_pktmbuf_alloc(pool);
         if (!mbuf) {
-            RTE_LOG(ERR, PCAP, "Failed to alloc mbuf, please adjust pktmbuf pool size\n");
+            RTE_LOG(ERR, PCAP, "Failed to alloc mbuf, please enlarge pktmbuf pool size\n");
             goto end;
         }
-        ret = read_next_packet(fd, mbuf->buf_addr, mbuf->buf_len);
-        if (unlikely(ret < 0)) {
-            rte_pktmbuf_free(mbuf);
-            RTE_LOG(INFO, PCAP, "Failed to read packet: %s\n", strerror(errno));
-            goto end;
-        } else if (unlikely(ret == 0)) {
-            rte_pktmbuf_free(mbuf);
-            RTE_LOG(INFO, PCAP, "Finished loading pcap\n");
-            ret = 0;
+        do {
+            const u_char *packet = pcap_next(pcap_file, &packet_header);
+            if (packet == NULL) {
+                rte_pktmbuf_free(mbuf);
+                RTE_LOG(INFO, PCAP, "Failed to read packet: %s\n", pcap_geterr(pcap_file));
+                goto end;
+            }
+            if (unlikely(packet_header.len > mbuf->buf_len)) {
+                RTE_LOG(INFO, PCAP, "Packet length %d exceeds the mbuf size %d, skip this packet\n",
+                    packet_header.len, mbuf->buf_len);
+                break;
+            }
+            rte_memcpy(mbuf->buf_addr, packet, packet_header.len);
+            mbuf->data_off = 0;
+            mbuf->data_len = mbuf->pkt_len = packet_header.len;
+            mbuf->nb_segs = 1;
+            mbuf->next = NULL;
+            mbufs[n++] = mbuf;
+            if (packet_header.len > max_len) {
+                max_len = packet_header.len;
+            }
+            bytes += packet_header.len;
             break;
-        }
-        mbuf->data_off = 0;
-        mbuf->data_len = mbuf->pkt_len = ret;
-        mbuf->nb_segs = 1;
-        mbuf->next = NULL;
-        mbufs[i++] = mbuf;
-        if (ret> max_len) {
-            max_len = ret;
-        }
-        bytes += ret;
+        } while (1);
     }
-    RTE_LOG(INFO, PCAP, "Read %d pkts (for a total of %lu bytes), max packet length = %d bytes.\n", i, bytes, max_len);
-    *nb_pkts = i;
+
 end:
-    if (fd > 0) {
-        close(fd);
+    if (n > 0) {
+        RTE_LOG(INFO, PCAP, "Read %d pkts (for a total of %lu bytes), max packet length = %d bytes.\n", n, bytes, max_len);
+        *nb_pkts = n;
+        ret = 0;
+    }
+
+    if (pcap_file > 0) {
+        pcap_close(pcap_file);
     }
     return ret;
 }

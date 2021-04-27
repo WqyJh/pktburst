@@ -46,7 +46,7 @@ else()
 endif()
 
 include_directories(${PROJECT_SOURCE_DIR} ${DPDK_INCLUDE_DIRS})
-set(LIBRARIES ${LIBRARIES} ${DPDK_LIBRARIES} pthread dl rt m numa)
+set(LIBRARIES ${LIBRARIES} ${DPDK_LIBRARIES} pcap pthread dl rt m numa)
 
 include_directories(${PROJECT_SOURCE_DIR}/include)
 
