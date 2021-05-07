@@ -483,6 +483,7 @@ int main(int argc, char *argv[]) {
         stats_config.portmask = arguments.portmask;
         stats_config.txq = nb_txq;
         stats_config.nb_tx_cores = nb_tx_cores;
+        stats_config.nb_ports = nb_ports;
         stats_config.interval = arguments.statistics;
         stats_config.core_counter = &core_counter;
         start_stats_display(&stats_config);

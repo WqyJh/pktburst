@@ -8,6 +8,12 @@
 
 #include <tx_core.h>
 
+struct port_stats_ {
+    uint64_t packets;
+    uint64_t bytes;
+    uint64_t drop;
+    struct timespec start, end;
+};
 
 struct stats_config {
     struct tx_core_config *tx_core_config_list;
@@ -15,12 +21,10 @@ struct stats_config {
     rte_atomic16_t *core_counter;
     uint64_t portmask;
     uint64_t interval;
-    uint64_t last_packets_;
-    uint64_t last_bytes_;
-    uint64_t last_drop_;
     uint16_t txq;
     uint16_t nb_tx_cores;
-    struct timespec start_, end_;
+    uint16_t nb_ports;
+    struct port_stats_ *stats_;
 };
 
 /*
