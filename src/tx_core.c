@@ -97,7 +97,7 @@ static inline bool process_packet(struct tx_core_config *config, struct rte_mbuf
 
         // Collect stats
         stats->packets += nb_tx;
-        for (int i = nb_tx; i < config->burst_; i++) {
+        for (int i = 0; i < nb_tx; i++) {
             stats->bytes += rte_pktmbuf_pkt_len(config->pkts_[i]);
         }
 
