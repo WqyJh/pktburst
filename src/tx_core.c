@@ -67,17 +67,17 @@ static inline void modify_packet(struct tx_core_config *config, struct rte_mbuf 
 
 static inline void flush_packets(struct tx_core_config *config)
 {
-    // struct tx_core_stats *stats = &config->stats;
+    struct tx_core_stats *stats = &config->stats;
     struct rte_mbuf **pos = config->pkts_;
     uint32_t to_sent = config->off_;
     while (to_sent) {
         uint16_t nb_tx = rte_eth_tx_burst(config->port, config->qid_, pos, to_sent);
         if (++config->qid_ > config->qmax_) config->qid_ = config->queue_min;
         // // Collect stats
-        // stats->packets += nb_tx;
-        // for (int i = 0; i < nb_tx; i++) {
-        //     stats->bytes += rte_pktmbuf_pkt_len(pos[i]);
-        // }
+        stats->packets += nb_tx;
+        for (int i = 0; i < nb_tx; i++) {
+            stats->bytes += rte_pktmbuf_pkt_len(pos[i]);
+        }
         // Adjust pos
         to_sent -= nb_tx;
         pos += nb_tx;
@@ -86,7 +86,7 @@ static inline void flush_packets(struct tx_core_config *config)
 
 static inline bool process_packet(struct tx_core_config *config, struct rte_mbuf *mbuf)
 {
-    // struct tx_core_stats *stats = &config->stats;
+    struct tx_core_stats *stats = &config->stats;
 
     // Buffer fulled
     if (config->off_ == config->burst_) {
@@ -96,10 +96,10 @@ static inline bool process_packet(struct tx_core_config *config, struct rte_mbuf
         if (unlikely(nb_tx == 0)) return false;
 
         // Collect stats
-        // stats->packets += nb_tx;
-        // for (int i = nb_tx; i < config->burst_; i++) {
-        //     stats->bytes += rte_pktmbuf_pkt_len(config->pkts_[i]);
-        // }
+        stats->packets += nb_tx;
+        for (int i = nb_tx; i < config->burst_; i++) {
+            stats->bytes += rte_pktmbuf_pkt_len(config->pkts_[i]);
+        }
 
         // Move the unsent packets to front of bufs
         if (nb_tx < config->burst_) {
@@ -156,7 +156,6 @@ int tx_core(struct tx_core_config *config)
     config->burst_ = MIN(config->burst_size, config->nb_pkts_);
     config->pkts_ = (struct rte_mbuf **)rte_malloc(NULL, sizeof(struct rte_mbuf*) * config->burst_, 0);
 
-    // struct tx_core_stats *stats = &config->stats;
     int qid = config->queue_min;
     int qmax = config->queue_min + config->queue_num - 1;
 

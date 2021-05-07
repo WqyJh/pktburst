@@ -83,26 +83,27 @@ static void print_port_stats(struct stats_config *config, uint16_t port, int idx
             avg_bytes,
             port_stats.oerrors);
 
-    struct tx_core_stats stats;
-    memset(&stats, 0, sizeof(struct tx_core_stats));
+    struct tx_core_stats tx_stats;
+    memset(&tx_stats, 0, sizeof(struct tx_core_stats));
     for (int i = 0; i < config->nb_tx_cores; i++) {
         // Copy stats
         struct tx_core_config *tx_config = &config->tx_core_config_list[i];
         if (tx_config->port != port) continue;
-
+        struct tx_core_stats stats = tx_config->stats;
         // Accumulate stats
-        stats.packets += port_stats.q_opackets[i];
-        stats.bytes += port_stats.q_obytes[i];
-        stats.drop += port_stats.q_errors[i];
+        tx_stats.packets += stats.packets;
+        tx_stats.bytes += stats.bytes;
+        tx_stats.drop += stats.drop;
         // Print stats
         printf("Tx core %u port %u queue %u-%u\n", tx_config->core_id, tx_config->port,
             tx_config->queue_min, tx_config->queue_min + tx_config->queue_num - 1);
         printf("\tpackets=%lu\tbytes=%lu\terror=%lu\n",
-            port_stats.q_opackets[i], port_stats.q_obytes[i], port_stats.q_errors[i]);
+            stats.packets, stats.bytes, stats.drop);
     }
     // Print accumulated stats
     printf("Tx core summary\n");
-    printf("\tpackets=%lu\tbytes=%lu\terror=%lu\n", stats.packets, stats.bytes, stats.drop);
+    printf("\tpackets=%lu\tbytes=%lu\terror=%lu\n",
+        tx_stats.packets, tx_stats.bytes, tx_stats.drop);
 
     struct port_stats_ *stats_ = &config->stats_[idx];
 
@@ -111,18 +112,13 @@ static void print_port_stats(struct stats_config *config, uint16_t port, int idx
         fprintf(stderr, "clock_gettime failed on start: %s\n",
                 strerror(errno));
     } else {
-        uint32_t link_speed = config->tx_core_config_list[0].link_speed;
+        uint32_t link_speed = config->tx_core_config_list[idx].link_speed;
         double line_rate = link_speed * 1000 * 1000.0 / 8 / (avg_bytes + 8 + 12);
-
         double seconds = timespec_diff_to_double(stats_->start, stats_->end);
-        double pps = (stats.packets - stats_->packets) / seconds;
-        double bps = (stats.bytes - stats_->bytes) / seconds;
-        stats_->packets = stats.packets;
-        stats_->bytes = stats.bytes;
-        stats_->start = stats_->end;
-
-        stats_->packets = stats.packets;
-        stats_->bytes = stats.bytes;
+        double pps = (tx_stats.packets - stats_->packets) / seconds;
+        double bps = (tx_stats.bytes - stats_->bytes) / seconds;
+        stats_->packets = tx_stats.packets;
+        stats_->bytes = tx_stats.bytes;
         stats_->start = stats_->end;
 #define BUF_LEN 16
         char pps_buf[BUF_LEN];

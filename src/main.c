@@ -466,8 +466,7 @@ int main(int argc, char *argv[]) {
                 }
             }
             // Launch core
-            if (rte_eal_remote_launch((int (*)(void *))tx_core, config,
-                                    core_index) < 0)
+            if (rte_eal_remote_launch((int (*)(void *))tx_core, config, core_index) < 0)
                 rte_exit(EXIT_FAILURE,
                         "Could not launch tx core on lcore %d.\n", core_index);
             core_index = rte_get_next_lcore(core_index, true, 0);
