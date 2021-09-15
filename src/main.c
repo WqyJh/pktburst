@@ -43,6 +43,7 @@
 #define ARG_CORES_PER_PORT 10
 #define ARG_TXQ_PER_CORE 11
 #define ARG_NB_RUNS 12
+#define ARG_BITRATE 13
 
 #define PORTMASK_DEFAULT 0x1
 #define NB_TX_CORES_DEFAULT 1
@@ -54,6 +55,7 @@
 #define TXQ_PER_CORE_DEFAULT 1
 #define CORES_PER_PORT_DEFAULT 1
 #define NB_RUNS_DEFAULT 1
+#define BIRATE_DEFAULT 0
 
 const char *argp_program_version = "pktburst 1.0";
 const char *argp_program_bug_address = "781345688@qq.com";
@@ -80,6 +82,7 @@ static struct argp_option options[] = {
      "Show statistics interval (ms). (default: 0 not show)", 0},
     {"pcap", ARG_FILENAME, "FILENAME", 0,
      "Pcap file name. (required)", 0},
+     {"bitrate", ARG_BITRATE, "MBPS", 0, "Rate limit in Mbps.", 0},
     {0}};
 
 struct arguments {
@@ -92,6 +95,7 @@ struct arguments {
     uint16_t txq_per_core;
     uint16_t cores_per_port;
     uint16_t burst_size;
+    uint16_t bitrate;
     char filename[PATH_MAX];
 };
 
@@ -133,6 +137,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
     case ARG_NB_RUNS:
         arguments->nbruns = strtoul(arg, &end, 10);
         break;
+    case ARG_BITRATE:
+        arguments->bitrate = strtoul(arg, &end, 10);
+        break;
     default:
         return ARGP_ERR_UNKNOWN;
     }
@@ -146,7 +153,7 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
 // ------------------------- Port Init -------------------------
 
 static int port_init(uint8_t port, uint16_t rx_rings, uint16_t tx_rings,
-                     uint16_t num_rxdesc, uint16_t num_txdesc,
+                     uint16_t num_rxdesc, uint16_t num_txdesc, uint16_t tx_rate,
                      struct rte_mempool *mbuf_pool) {
     struct rte_eth_conf port_conf = {
         .txmode = {
@@ -285,6 +292,18 @@ static int port_init(uint8_t port, uint16_t rx_rings, uint16_t tx_rings,
             port, addr.addr_bytes[0], addr.addr_bytes[1], addr.addr_bytes[2],
             addr.addr_bytes[3], addr.addr_bytes[4], addr.addr_bytes[5],
             num_rxdesc, num_txdesc);
+
+    if (tx_rate > 0) {
+        for (uint16_t q = 0; q < tx_rings; q++) {
+            ret = rte_eth_set_queue_rate_limit(port, q, tx_rate);
+            if (ret < 0) {
+                RTE_LOG(ERR, PKTBURST,
+                    "rte_eth_set_queue_rate_limit(port=%u, queue_id=%u, tx_rate=%u): %s\n",
+                    port, q, tx_rate, rte_strerror(-ret));
+            return ret;
+            }
+        }
+    }
     return 0;
 }
 
@@ -340,6 +359,7 @@ int main(int argc, char *argv[]) {
         .num_mbufs = NUM_MBUFS_DEFAULT,
         .nbruns = NB_RUNS_DEFAULT,
         .statistics = STATS_INTERVAL_DEFAULT,
+        .bitrate = BIRATE_DEFAULT,
     };
     bzero(arguments.filename, PATH_MAX);
     // parse arguments
@@ -403,7 +423,7 @@ int main(int argc, char *argv[]) {
     // Port Init
     RTE_ETH_FOREACH_DEV(port) {
         if (!((1ULL << port) & arguments.portmask)) continue;
-        int ret = port_init(port, 0, nb_txq, 0, arguments.txd, mbuf_pool);
+        int ret = port_init(port, 0, nb_txq, 0, arguments.txd, arguments.bitrate, mbuf_pool);
         if (ret) {
             rte_exit(EXIT_FAILURE, "Cannot init port %" PRIu8 "\n", port);
         }
