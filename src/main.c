@@ -44,6 +44,7 @@
 #define ARG_TXQ_PER_CORE 11
 #define ARG_NB_RUNS 12
 #define ARG_BITRATE 13
+#define ARG_PKTRATE 14
 
 #define PORTMASK_DEFAULT 0x1
 #define NB_TX_CORES_DEFAULT 1
@@ -56,6 +57,7 @@
 #define CORES_PER_PORT_DEFAULT 1
 #define NB_RUNS_DEFAULT 1
 #define BIRATE_DEFAULT 0
+#define PKTRATE_DEFAULT 0
 
 const char *argp_program_version = "pktburst 1.0";
 const char *argp_program_bug_address = "781345688@qq.com";
@@ -82,7 +84,8 @@ static struct argp_option options[] = {
      "Show statistics interval (ms). (default: 0 not show)", 0},
     {"pcap", ARG_FILENAME, "FILENAME", 0,
      "Pcap file name. (required)", 0},
-     {"bitrate", ARG_BITRATE, "MBPS", 0, "Rate limit in Mbps.", 0},
+     {"bitrate", ARG_BITRATE, "BITRATE", 0, "Rate limit in Mbps.", 0},
+     {"pktrate", ARG_PKTRATE, "PKTRATE", 0, "Rate limit in Mpps.", 0},
     {0}};
 
 struct arguments {
@@ -91,6 +94,7 @@ struct arguments {
     uint64_t nbruns;
     uint32_t statistics;
     uint32_t num_mbufs;
+    uint32_t pktrate;
     uint16_t txd;
     uint16_t txq_per_core;
     uint16_t cores_per_port;
@@ -139,6 +143,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
         break;
     case ARG_BITRATE:
         arguments->bitrate = strtoul(arg, &end, 10);
+        break;
+    case ARG_PKTRATE:
+        arguments->pktrate = strtoul(arg, &end, 10);
         break;
     default:
         return ARGP_ERR_UNKNOWN;
@@ -360,6 +367,7 @@ int main(int argc, char *argv[]) {
         .nbruns = NB_RUNS_DEFAULT,
         .statistics = STATS_INTERVAL_DEFAULT,
         .bitrate = BIRATE_DEFAULT,
+        .pktrate = PKTRATE_DEFAULT,
     };
     bzero(arguments.filename, PATH_MAX);
     // parse arguments
@@ -459,6 +467,7 @@ int main(int argc, char *argv[]) {
             config->stop_condition = &should_stop;
             config->link_speed = eth_link.link_speed;
             config->core_id = core_index;
+            config->pktrate = arguments.pktrate;
             config->filename = arguments.filename;
             config->pool = mbuf_pool;
             config->port = port;

@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <generic/rte_cycles.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -88,6 +89,13 @@ static inline bool process_packet(struct tx_core_config *config, struct rte_mbuf
 {
     struct tx_core_stats *stats = &config->stats;
 
+    config->end_time_ = rte_rdtsc();
+    float seconds = (float)(config->end_time_ - config->start_time_) / rte_get_tsc_hz();
+    float speed = stats->packets / seconds;
+    if (speed > config->send_rate_) {
+        return false;
+    }
+
     // Buffer fulled
     if (config->off_ == config->burst_) {
         // Sent packets
@@ -155,6 +163,7 @@ int tx_core(struct tx_core_config *config)
 
     config->burst_ = MIN(config->burst_size, config->nb_pkts_);
     config->pkts_ = (struct rte_mbuf **)rte_malloc(NULL, sizeof(struct rte_mbuf*) * config->burst_, 0);
+    config->send_rate_ = config->pktrate * 1000;
 
     int qid = config->queue_min;
     int qmax = config->queue_min + config->queue_num - 1;
@@ -162,8 +171,8 @@ int tx_core(struct tx_core_config *config)
     RTE_LOG(INFO, TX, "Tx core %u is running for port %u queue %u-%u\n",
         rte_lcore_id(), config->port, qid, qmax);
 
-    int i = 0;
-    for (;;) {
+    config->start_time_ = rte_rdtsc();
+    for (int i = 0;;) {
         if (unlikely(*(config->stop_condition))) {
             break;
         }

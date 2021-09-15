@@ -28,10 +28,14 @@ struct tx_core_config {
     struct rte_mbuf **pkts_;
     uint64_t nbruns;
     uint64_t nbruns_;
+    uint64_t start_time_;
+    uint64_t end_time_;
     uint32_t prepare_off_;
     uint32_t link_speed;
     uint32_t nb_pkts;
     uint32_t core_id;
+    uint32_t pktrate;
+    uint32_t send_rate_;
     uint32_t batch_;
     uint32_t nb_pkts_;
     uint16_t burst_size;
