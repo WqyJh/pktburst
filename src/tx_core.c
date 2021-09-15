@@ -92,7 +92,7 @@ static inline bool process_packet(struct tx_core_config *config, struct rte_mbuf
     config->end_time_ = rte_rdtsc();
     float seconds = (float)(config->end_time_ - config->start_time_) / rte_get_tsc_hz();
     float speed = stats->packets / seconds;
-    if (speed > config->send_rate_) {
+    if (config->send_rate_ > 0 && speed > config->send_rate_) {
         return false;
     }
 

@@ -83,3 +83,45 @@ Tx core summary
 ===================================
 ```
 
+```bash
+sudo pktburst -l 0-1 -- --portmask 0x1 --pcap packets.pcap --bitrate 1000
+```
+
+Send packets at 1000 Mbps.
+
+```bash
+=== Packet burst statistics \ ===
+-- PORT 1 --
+        Built-in counters:
+        TX Successful packets: 15748373
+        TX Successful bytes: 991.241 M (avg: 65.00 bytes/pkt)
+        TX Unsuccessful packets: 0
+Tx core 1 port 1 queue 0-0
+        packets=15748959        bytes=1039431294        error=0
+Tx core summary
+        packets=15748959        bytes=1039431294        error=0
+        speed   1.786 Mpps      112.394 MBps    linerate=14.706 Mpps
+===================================
+```
+
+```bash
+sudo pktburst -l 0-1 -- --portmask 0x1 --pcap packets.pcap --pktrate 5000
+```
+
+Send packets at 5000 Kpps.
+
+```bash
+EAL: Detected 2 NUMA nodes
+=== Packet burst statistics - ===
+-- PORT 1 --
+        Built-in counters:
+        TX Successful packets: 18992464
+        TX Successful bytes: 1.167 G (avg: 65.00 bytes/pkt)
+        TX Unsuccessful packets: 0
+Tx core 1 port 1 queue 0-0
+        packets=18992651        bytes=1253514966        error=0
+Tx core summary
+        packets=18992651        bytes=1253514966        error=0
+        speed   4.988 Mpps      313.966 MBps    linerate=14.706 Mpps
+===================================
+```
