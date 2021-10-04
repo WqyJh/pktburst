@@ -45,6 +45,7 @@
 #define ARG_NB_RUNS 12
 #define ARG_BITRATE 13
 #define ARG_PKTRATE 14
+#define ARG_WATCH 15
 
 #define PORTMASK_DEFAULT 0x1
 #define NB_TX_CORES_DEFAULT 1
@@ -58,6 +59,7 @@
 #define NB_RUNS_DEFAULT 1
 #define BIRATE_DEFAULT 0
 #define PKTRATE_DEFAULT 0
+#define WATCH_DEFAULT 0
 
 const char *argp_program_version = "pktburst 1.0";
 const char *argp_program_bug_address = "781345688@qq.com";
@@ -86,6 +88,7 @@ static struct argp_option options[] = {
      "Pcap file name. (required)", 0},
      {"bitrate", ARG_BITRATE, "BITRATE", 0, "Rate limit in Mbps.", 0},
      {"pktrate", ARG_PKTRATE, "PKTRATE", 0, "Rate limit in Mpps.", 0},
+     {"watch", ARG_WATCH, 0, 0, "Real time watch.", 0},
     {0}};
 
 struct arguments {
@@ -100,6 +103,7 @@ struct arguments {
     uint16_t cores_per_port;
     uint16_t burst_size;
     uint16_t bitrate;
+    uint16_t watch;
     char filename[PATH_MAX];
 };
 
@@ -146,6 +150,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
         break;
     case ARG_PKTRATE:
         arguments->pktrate = strtoul(arg, &end, 10);
+        break;
+    case ARG_WATCH:
+        arguments->watch = 1;
         break;
     default:
         return ARGP_ERR_UNKNOWN;
@@ -368,6 +375,7 @@ int main(int argc, char *argv[]) {
         .statistics = STATS_INTERVAL_DEFAULT,
         .bitrate = BIRATE_DEFAULT,
         .pktrate = PKTRATE_DEFAULT,
+        .watch = WATCH_DEFAULT,
     };
     bzero(arguments.filename, PATH_MAX);
     // parse arguments
@@ -518,6 +526,7 @@ int main(int argc, char *argv[]) {
         stats_config.nb_ports = nb_ports;
         stats_config.interval = arguments.statistics;
         stats_config.core_counter = &core_counter;
+        stats_config.watch = arguments.watch;
         start_stats_display(&stats_config);
     }
 

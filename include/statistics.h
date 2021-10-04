@@ -24,6 +24,7 @@ struct stats_config {
     uint16_t txq;
     uint16_t nb_tx_cores;
     uint16_t nb_ports;
+    uint16_t watch;
     struct port_stats_ *stats_;
 };
 

@@ -132,7 +132,9 @@ static void print_port_stats(struct stats_config *config, uint16_t port, int idx
 
 static void print_stats(struct stats_config *config)
 {
-    printf("\e[1;1H\e[2J");
+    if (config->watch) {
+        printf("\e[1;1H\e[2J");
+    }
     printf("=== Packet burst statistics %c ===\n", ROTATING_CHAR[nb_stat_update++ % 4]);
     uint16_t port;
     uint16_t port_idx = 0;
