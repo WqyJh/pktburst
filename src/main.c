@@ -392,6 +392,10 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    if (nb_ports == 0) {
+        rte_exit(EXIT_FAILURE, "No port specified\n");
+    }
+
     // Checks core number
     nb_tx_cores = nb_ports * arguments.cores_per_port;
     required_cores = 1 + nb_tx_cores;
