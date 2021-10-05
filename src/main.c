@@ -32,7 +32,8 @@
 
 // ------------------------- Arguments Parsing -------------------------
 
-#define _S(x) #x
+#define STR_HELPER(x) #x
+#define STR(x) STR_HELPER(x)
 
 #define ARG_PORTMASK 1
 #define ARG_TX_DESCS 4
@@ -67,23 +68,23 @@ static char doc[] = "A DPDK-based program load and send pcap packets.";
 static char args_doc[] = "";
 static struct argp_option options[] = {
     {"portmask", ARG_PORTMASK, "PORTMASK", 0,
-     "Portmask. (default: "_S(PORTMASK_DEFAULT) ")", 0},
+     "Portmask. (default: "STR(PORTMASK_DEFAULT) ")", 0},
     {"cores", ARG_CORES_PER_PORT, "CORES_PER_PORT", 0,
-     "Number of tx cores per port. (default: "_S(CORES_PER_PORT_DEFAULT) ")", 0},
+     "Number of tx cores per port. (default: "STR(CORES_PER_PORT_DEFAULT) ")", 0},
     {"txq", ARG_TXQ_PER_CORE, "TXQ_PER_CORE", 0,
-     "Number of tx queues per core. (default: "_S(TXQ_PER_CORE_DEFAULT) ")", 0},
+     "Number of tx queues per core. (default: "STR(TXQ_PER_CORE_DEFAULT) ")", 0},
     {"txd", ARG_TX_DESCS, "TX_DESCS", 0,
-     "Number of tx descs per queue. (default: "_S(NB_TX_DESCS_DEFAULT) ")", 0},
+     "Number of tx descs per queue. (default: "STR(NB_TX_DESCS_DEFAULT) ")", 0},
     {"burst", ARG_BURST_SIZE, "BURST_SIZE", 0,
-     "Burst size for rx/tx and ring enqueue/dequeue. (default: "_S(
+     "Burst size for rx/tx and ring enqueue/dequeue. (default: "STR(
          NB_BURST_SIZE_DEFAULT) ")",
      0},
     {"mbufs", ARG_NUM_MBUFS, "NUM_MBUFS", 0,
-     "Number of mbufs in mempool. (default: "_S(NUM_MBUFS_DEFAULT) "s)", 0},
+     "Number of mbufs in mempool. (default: "STR(NUM_MBUFS_DEFAULT) "s)", 0},
     {"nbruns", ARG_NB_RUNS, "NB_RUNS", 0,
-     "Repeat times. (default: "_S(NB_RUNS_DEFAULT) "s)", 0},
+     "Repeat times. (default: "STR(NB_RUNS_DEFAULT) "s)", 0},
     {"stats", ARG_STATISTICS, "STATS_INTERVAL", 0,
-     "Show statistics interval (ms). (default: 0 not show)", 0},
+     "Show statistics interval (ms). (default: " STR(STATS_INTERVAL_DEFAULT) "). Set to 0 to disable.", 0},
     {"pcap", ARG_FILENAME, "FILENAME", 0,
      "Pcap file name. (required)", 0},
      {"bitrate", ARG_BITRATE, "BITRATE", 0, "Rate limit in Mbps.", 0},
