@@ -3,17 +3,18 @@
  */
 
 #include <argp.h>
+#include <limits.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <limits.h>
 
 #include <rte_common.h>
 #include <rte_eal.h>
 #include <rte_errno.h>
 #include <rte_ethdev.h>
 #include <rte_ether.h>
+#include <rte_hash.h>
 #include <rte_launch.h>
 #include <rte_lcore.h>
 #include <rte_log.h>
@@ -21,10 +22,9 @@
 #include <rte_mbuf.h>
 #include <rte_mempool.h>
 #include <rte_version.h>
-#include <rte_hash.h>
 
-#include <tx_core.h>
 #include <statistics.h>
+#include <tx_core.h>
 
 #define MAX_PKT_BURST 512
 #define MBUF_CACHE_SIZE 256
@@ -68,28 +68,32 @@ static char doc[] = "A DPDK-based program load and send pcap packets.";
 static char args_doc[] = "";
 static struct argp_option options[] = {
     {"portmask", ARG_PORTMASK, "PORTMASK", 0,
-     "Portmask. (default: "STR(PORTMASK_DEFAULT) ")", 0},
+     "Portmask. (default: " STR(PORTMASK_DEFAULT) ")", 0},
     {"cores", ARG_CORES_PER_PORT, "CORES_PER_PORT", 0,
-     "Number of tx cores per port. (default: "STR(CORES_PER_PORT_DEFAULT) ")", 0},
+     "Number of tx cores per port. (default: " STR(CORES_PER_PORT_DEFAULT) ")",
+     0},
     {"txq", ARG_TXQ_PER_CORE, "TXQ_PER_CORE", 0,
-     "Number of tx queues per core. (default: "STR(TXQ_PER_CORE_DEFAULT) ")", 0},
+     "Number of tx queues per core. (default: " STR(TXQ_PER_CORE_DEFAULT) ")",
+     0},
     {"txd", ARG_TX_DESCS, "TX_DESCS", 0,
-     "Number of tx descs per queue. (default: "STR(NB_TX_DESCS_DEFAULT) ")", 0},
+     "Number of tx descs per queue. (default: " STR(NB_TX_DESCS_DEFAULT) ")",
+     0},
     {"burst", ARG_BURST_SIZE, "BURST_SIZE", 0,
-     "Burst size for rx/tx and ring enqueue/dequeue. (default: "STR(
+     "Burst size for rx/tx and ring enqueue/dequeue. (default: " STR(
          NB_BURST_SIZE_DEFAULT) ")",
      0},
     {"mbufs", ARG_NUM_MBUFS, "NUM_MBUFS", 0,
-     "Number of mbufs in mempool. (default: "STR(NUM_MBUFS_DEFAULT) "s)", 0},
+     "Number of mbufs in mempool. (default: " STR(NUM_MBUFS_DEFAULT) "s)", 0},
     {"nbruns", ARG_NB_RUNS, "NB_RUNS", 0,
-     "Repeat times. (default: "STR(NB_RUNS_DEFAULT) "s)", 0},
+     "Repeat times. (default: " STR(NB_RUNS_DEFAULT) "s)", 0},
     {"stats", ARG_STATISTICS, "STATS_INTERVAL", 0,
-     "Show statistics interval (ms). (default: " STR(STATS_INTERVAL_DEFAULT) "). Set to 0 to disable.", 0},
-    {"pcap", ARG_FILENAME, "FILENAME", 0,
-     "Pcap file name. (required)", 0},
-     {"bitrate", ARG_BITRATE, "BITRATE", 0, "Rate limit in Mbps.", 0},
-     {"pktrate", ARG_PKTRATE, "PKTRATE", 0, "Rate limit in Mpps.", 0},
-     {"watch", ARG_WATCH, 0, 0, "Real time watch.", 0},
+     "Show statistics interval (ms). (default: " STR(
+         STATS_INTERVAL_DEFAULT) "). Set to 0 to disable.",
+     0},
+    {"pcap", ARG_FILENAME, "FILENAME", 0, "Pcap file name. (required)", 0},
+    {"bitrate", ARG_BITRATE, "BITRATE", 0, "Rate limit in Mbps.", 0},
+    {"pktrate", ARG_PKTRATE, "PKTRATE", 0, "Rate limit in Mpps.", 0},
+    {"watch", ARG_WATCH, 0, 0, "Real time watch.", 0},
     {0}};
 
 struct arguments {
@@ -172,9 +176,8 @@ static int port_init(uint8_t port, uint16_t rx_rings, uint16_t tx_rings,
                      struct rte_mempool *mbuf_pool) {
     struct rte_eth_conf port_conf = {
         .txmode = {
-            .mq_mode = ETH_MQ_TX_NONE,  // Multi queue packet routing mode.
-        }
-    };
+            .mq_mode = ETH_MQ_TX_NONE, // Multi queue packet routing mode.
+        }};
     struct rte_eth_dev_info dev_info;
     int ret;
     uint16_t dev_count;
@@ -203,8 +206,11 @@ static int port_init(uint8_t port, uint16_t rx_rings, uint16_t tx_rings,
         num_rxdesc = dev_info.rx_desc_lim.nb_min * 2;
     }
 
-    RTE_LOG(ERR, PKTBURST, "Port %d has %u rx queues (%u requested) and %u tx queues (%u requested).\n",
-        port, dev_info.max_rx_queues, rx_rings, dev_info.max_tx_queues, tx_rings);
+    RTE_LOG(ERR, PKTBURST,
+            "Port %d has %u rx queues (%u requested) and %u tx queues (%u "
+            "requested).\n",
+            port, dev_info.max_rx_queues, rx_rings, dev_info.max_tx_queues,
+            tx_rings);
 
     if (rx_rings > dev_info.max_rx_queues) {
         RTE_LOG(ERR, PKTBURST,
@@ -223,8 +229,7 @@ static int port_init(uint8_t port, uint16_t rx_rings, uint16_t tx_rings,
     }
 
     if (dev_info.tx_offload_capa & DEV_TX_OFFLOAD_MBUF_FAST_FREE)
-		port_conf.txmode.offloads |=
-			DEV_TX_OFFLOAD_MBUF_FAST_FREE;
+        port_conf.txmode.offloads |= DEV_TX_OFFLOAD_MBUF_FAST_FREE;
 
     RTE_LOG(INFO, PKTBURST,
             "Port %d RX descriptors limits (min:%d, max:%d, align:%d)\n", port,
@@ -264,31 +269,33 @@ static int port_init(uint8_t port, uint16_t rx_rings, uint16_t tx_rings,
         ret = rte_eth_rx_queue_setup(
             port, q, num_rxdesc, rte_eth_dev_socket_id(port), NULL, mbuf_pool);
         if (ret) {
-            RTE_LOG(ERR, PKTBURST,
+            RTE_LOG(
+                ERR, PKTBURST,
                 "rte_eth_rx_queue_setup(port=%u, queue_id=%u, rxd=%u): %s\n",
                 port, q, num_rxdesc, rte_strerror(-ret));
             return ret;
         }
         RTE_LOG(INFO, PKTBURST,
-            "rte_eth_rx_queue_setup(port=%u, queue_id=%u, rxd=%u)\n",
-            port, q, num_rxdesc);
+                "rte_eth_rx_queue_setup(port=%u, queue_id=%u, rxd=%u)\n", port,
+                q, num_rxdesc);
     }
 
     struct rte_eth_txconf txconf;
     txconf = dev_info.default_txconf;
-	txconf.offloads = port_conf.txmode.offloads;
+    txconf.offloads = port_conf.txmode.offloads;
     for (uint16_t q = 0; q < tx_rings; q++) {
         ret = rte_eth_tx_queue_setup(port, q, num_txdesc,
-                                        rte_eth_dev_socket_id(port), &txconf);
+                                     rte_eth_dev_socket_id(port), &txconf);
         if (ret < 0) {
-            RTE_LOG(ERR, PKTBURST,
+            RTE_LOG(
+                ERR, PKTBURST,
                 "rte_eth_tx_queue_setup(port=%u, queue_id=%u, rxd=%u): %s\n",
                 port, q, num_txdesc, rte_strerror(-ret));
             return ret;
         }
         RTE_LOG(DEBUG, PKTBURST,
-            "rte_eth_tx_queue_setup(port=%u, queue_id=%u, txd=%u)\n",
-            port, q, num_txdesc);
+                "rte_eth_tx_queue_setup(port=%u, queue_id=%u, txd=%u)\n", port,
+                q, num_txdesc);
     }
 
     ret = rte_eth_dev_start(port);
@@ -313,9 +320,10 @@ static int port_init(uint8_t port, uint16_t rx_rings, uint16_t tx_rings,
             ret = rte_eth_set_queue_rate_limit(port, q, tx_rate);
             if (ret < 0) {
                 RTE_LOG(ERR, PKTBURST,
-                    "rte_eth_set_queue_rate_limit(port=%u, queue_id=%u, tx_rate=%u): %s\n",
-                    port, q, tx_rate, rte_strerror(-ret));
-            return ret;
+                        "rte_eth_set_queue_rate_limit(port=%u, queue_id=%u, "
+                        "tx_rate=%u): %s\n",
+                        port, q, tx_rate, rte_strerror(-ret));
+                return ret;
             }
         }
     }
@@ -337,10 +345,11 @@ static void signal_handler(int sig) {
 int load_pcap(const char *filename, struct rte_mempool *pool,
               struct rte_mbuf **mbufs, int *nb_pkts);
 
-static inline void copy_mbufs(struct rte_mbuf **dst, struct rte_mbuf **src, int n)
-{
+static inline void copy_mbufs(struct rte_mbuf **dst, struct rte_mbuf **src,
+                              int n) {
     for (int i = 0; i < n; i++) {
-        dst[i] = rte_pktmbuf_copy(src[i], src[i]->pool, 0, rte_pktmbuf_pkt_len(src[i]));
+        dst[i] = rte_pktmbuf_copy(src[i], src[i]->pool, 0,
+                                  rte_pktmbuf_pkt_len(src[i]));
     }
 }
 
@@ -390,7 +399,7 @@ int main(int argc, char *argv[]) {
 #endif
 
     if (strlen(arguments.filename) == 0) {
-        rte_exit(EXIT_FAILURE, "Pcap file not specified\n"); 
+        rte_exit(EXIT_FAILURE, "Pcap file not specified\n");
     }
 
     uint16_t port;
@@ -424,7 +433,8 @@ int main(int argc, char *argv[]) {
     RTE_LOG(INFO, PKTBURST, "Create MBUF_POOL size=%u\n", arguments.num_mbufs);
     mbufs_list = rte_malloc(NULL, sizeof(struct rte_mbuf **) * nb_ports, 0);
     for (int i = 0; i < nb_ports; i++) {
-        mbufs_list[i] = rte_zmalloc(NULL, sizeof(struct rte_mbuf *) * arguments.num_mbufs, 0);
+        mbufs_list[i] = rte_zmalloc(
+            NULL, sizeof(struct rte_mbuf *) * arguments.num_mbufs, 0);
     }
 
     ret = load_pcap(arguments.filename, mbuf_pool, mbufs_list[0], &nb_pkts);
@@ -439,12 +449,15 @@ int main(int argc, char *argv[]) {
     uint16_t nb_txq = arguments.txq_per_core * arguments.cores_per_port;
 
     // Init stats/config list
-    tx_core_config_list = rte_zmalloc(NULL, sizeof(struct tx_core_config) * nb_tx_cores, 0);
+    tx_core_config_list =
+        rte_zmalloc(NULL, sizeof(struct tx_core_config) * nb_tx_cores, 0);
 
     // Port Init
     RTE_ETH_FOREACH_DEV(port) {
-        if (!((1ULL << port) & arguments.portmask)) continue;
-        int ret = port_init(port, 0, nb_txq, 0, arguments.txd, arguments.bitrate, mbuf_pool);
+        if (!((1ULL << port) & arguments.portmask))
+            continue;
+        int ret = port_init(port, 0, nb_txq, 0, arguments.txd,
+                            arguments.bitrate, mbuf_pool);
         if (ret) {
             rte_exit(EXIT_FAILURE, "Cannot init port %" PRIu8 "\n", port);
         }
@@ -456,16 +469,18 @@ int main(int argc, char *argv[]) {
     int tx_core_idx = 0;
 
     RTE_ETH_FOREACH_DEV(port) {
-        if (!((1ULL << port) & arguments.portmask)) continue;
+        if (!((1ULL << port) & arguments.portmask))
+            continue;
 
         /* Get link status and display it. */
         struct rte_eth_link eth_link;
         rte_eth_link_get(port, &eth_link);
         if (eth_link.link_status) {
             RTE_LOG(INFO, PKTBURST, "Link up - speed %u Mbps - %s\n",
-                eth_link.link_speed,
-                (eth_link.link_duplex == ETH_LINK_FULL_DUPLEX) ?
-                "full-duplex" : "half-duplex\n");
+                    eth_link.link_speed,
+                    (eth_link.link_duplex == ETH_LINK_FULL_DUPLEX)
+                        ? "full-duplex"
+                        : "half-duplex\n");
         } else {
             RTE_LOG(INFO, PKTBURST, "Link down\n");
         }
@@ -474,7 +489,8 @@ int main(int argc, char *argv[]) {
         uint16_t nb_pkts_per_core = nb_pkts / arguments.cores_per_port;
         struct rte_mbuf **mbufs = mbufs_list[tx_core_idx];
         // Tx Cores
-        for (int i = 0; i < arguments.cores_per_port; i++, qid += arguments.txq_per_core) {
+        for (int i = 0; i < arguments.cores_per_port;
+             i++, qid += arguments.txq_per_core) {
             // Config core
             struct tx_core_config *config = &tx_core_config_list[tx_core_idx++];
             config->stop_condition = &should_stop;
@@ -497,7 +513,8 @@ int main(int argc, char *argv[]) {
             config->txd = arguments.txd;
             rte_atomic16_inc(&core_counter);
 
-            for (uint16_t q = config->queue_min; q < config->queue_min + config->queue_num; q++) {
+            for (uint16_t q = config->queue_min;
+                 q < config->queue_min + config->queue_num; q++) {
                 ret = rte_eth_dev_set_tx_queue_stats_mapping(port, q, i);
                 if (ret) {
                     RTE_LOG(WARNING, PKTBURST,
@@ -508,9 +525,10 @@ int main(int argc, char *argv[]) {
                 }
             }
             // Launch core
-            if (rte_eal_remote_launch((int (*)(void *))tx_core, config, core_index) < 0)
+            if (rte_eal_remote_launch((int (*)(void *))tx_core, config,
+                                      core_index) < 0)
                 rte_exit(EXIT_FAILURE,
-                        "Could not launch tx core on lcore %d.\n", core_index);
+                         "Could not launch tx core on lcore %d.\n", core_index);
             core_index = rte_get_next_lcore(core_index, true, 0);
         }
     }
