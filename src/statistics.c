@@ -74,16 +74,8 @@ static void print_port_stats(struct stats_config *config, uint16_t port, int idx
     struct port_stats_ *stats_ = &config->stats_[idx];
     int ret = clock_gettime(CLOCK_TYPE_ID, &stats_->end);
 
-    double avg_bytes = port_stats.opackets ? ((double)port_stats.obytes / port_stats.opackets) : 0;
-
-    printf("\tBuilt-in counters:\n" \
-        "\tTX Successful packets: %lu\n" \
-        "\tTX Successful bytes: %s (avg: %.2lf bytes/pkt)\n" \
-        "\tTX Unsuccessful packets: %lu\n",
-            port_stats.opackets,
-            bytes_format(port_stats.obytes),
-            avg_bytes,
-            port_stats.oerrors);
+    double avg_bytes = 0;
+    double line_rate = 0;
 
     // struct tx_core_stats tx_stats;
     // memset(&tx_stats, 0, sizeof(struct tx_core_stats));
@@ -113,10 +105,17 @@ static void print_port_stats(struct stats_config *config, uint16_t port, int idx
                 strerror(errno));
     } else {
         uint32_t link_speed = config->tx_core_config_list[idx].link_speed;
-        double line_rate = link_speed * 1000 * 1000.0 / 8 / (avg_bytes + 8 + 12);
+        uint64_t tx_packets = port_stats.opackets - stats_->packets;
+        uint64_t tx_bytes = port_stats.obytes - stats_->bytes;
+
+        if (tx_packets > 0) {
+            avg_bytes = (double)tx_bytes / tx_packets;
+            line_rate = link_speed * 1000 * 1000.0 / (8 * (avg_bytes + 8 + 12));
+        }
+
         double seconds = timespec_diff_to_double(stats_->start, stats_->end);
-        double pps = (port_stats.opackets - stats_->packets) / seconds;
-        double bps = (port_stats.obytes - stats_->bytes) / seconds;
+        double pps = tx_packets / seconds;
+        double bps = tx_bytes / seconds;
         stats_->packets = port_stats.opackets;
         stats_->bytes = port_stats.obytes;
         stats_->start = stats_->end;
@@ -128,6 +127,14 @@ static void print_port_stats(struct stats_config *config, uint16_t port, int idx
             bytes_format(bps),
             kilo_format(line_rate, line_rate_buf, BUF_LEN));
     }
+    printf("\tBuilt-in counters:\n" \
+    "\tTX Successful packets: %lu\n" \
+    "\tTX Successful bytes: %s (avg: %.2lf bytes/pkt)\n" \
+    "\tTX Unsuccessful packets: %lu\n",
+        port_stats.opackets,
+        bytes_format(port_stats.obytes),
+        avg_bytes,
+        port_stats.oerrors);
 }
 
 static void print_stats(struct stats_config *config)
