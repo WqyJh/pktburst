@@ -109,7 +109,7 @@ static void print_port_stats(struct stats_config *config, uint16_t port, int idx
         uint64_t tx_bytes = port_stats.obytes - stats_->bytes;
 
         if (tx_packets > 0) {
-            avg_bytes = (double)tx_bytes / tx_packets;
+            avg_bytes = (double)tx_bytes / tx_packets + 4; // add 4 bytes FCS
             line_rate = link_speed * 1000 * 1000.0 / (8 * (avg_bytes + 8 + 12));
         }
 
