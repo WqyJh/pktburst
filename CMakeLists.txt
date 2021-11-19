@@ -52,9 +52,9 @@ include_directories(${PROJECT_SOURCE_DIR}/include)
 
 add_executable(pktburst
     src/main.c
-    src/pcap.c
     src/tx_core.c
     src/statistics.c
+    src/loader.c
 )
 target_link_libraries(pktburst ${LIBRARIES})
 

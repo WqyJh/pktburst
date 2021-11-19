@@ -19,34 +19,13 @@ struct tx_core_stats {
 };
 
 struct tx_core_config {
-    char *filename;
-    bool volatile *stop_condition;
-    struct rte_mempool *pool;
-    struct rte_mbuf **mbufs;
-    rte_atomic16_t *core_counter;
-    struct rte_mbuf **mbufs_;
-    struct rte_mbuf **pkts_;
-    uint64_t nbruns;
-    uint64_t nbruns_;
-    uint64_t start_time_;
-    uint64_t end_time_;
-    uint32_t prepare_off_;
-    uint32_t link_speed;
-    uint32_t nb_pkts;
+    struct rte_ring *ring;
     uint32_t core_id;
-    uint32_t pktrate;
-    uint32_t send_rate_;
-    uint32_t batch_;
-    uint32_t nb_pkts_;
+    uint32_t socket;
     uint16_t burst_size;
     uint16_t port;
     uint16_t queue_min;
     uint16_t queue_num;
-    uint16_t txd;
-    uint16_t qid_;
-    uint16_t qmax_;
-    uint16_t off_;
-    uint16_t burst_;
     struct tx_core_stats stats;
 };
 

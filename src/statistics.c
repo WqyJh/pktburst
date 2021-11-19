@@ -2,15 +2,17 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <rte_malloc.h>
 #include <rte_atomic.h>
 #include <rte_branch_prediction.h>
+#include <rte_cycles.h>
 #include <rte_ethdev.h>
 #include <rte_log.h>
-#include <rte_cycles.h>
+#include <rte_malloc.h>
 
-#include <tx_core.h>
+#include <common.h>
 #include <statistics.h>
+#include <tx_core.h>
+#include <loader.h>
 
 #ifdef CLOCK_MONOTONIC_RAW /* Defined in glibc bits/time.h */
 #define CLOCK_TYPE_ID CLOCK_MONOTONIC_RAW
@@ -24,8 +26,8 @@
 #define ROTATING_CHAR "-\\|/"
 static unsigned int nb_stat_update = 0;
 
-const char * bytes_unit[] = { "B", "KB", "MB", "GB", "TB" };
-const char * units[] = { "", "K", "M", "G", "T" };
+const char *bytes_unit[] = {"B", "KB", "MB", "GB", "TB"};
+const char *units[] = {"", "K", "M", "G", "T"};
 char result[50];
 
 char *bytes_format(uint64_t bytes) {
@@ -50,8 +52,8 @@ char *kilo_format(double n, char *output, int len) {
     return output;
 }
 
-double timespec_diff_to_double(const struct timespec start, const struct timespec end)
-{
+double timespec_diff_to_double(const struct timespec start,
+                               const struct timespec end) {
     struct timespec diff;
     double duration;
 
@@ -66,8 +68,22 @@ double timespec_diff_to_double(const struct timespec start, const struct timespe
     return (duration);
 }
 
-static void print_port_stats(struct stats_config *config, uint16_t port, int idx)
-{
+static void print_loader_stats(struct stats_config *config) {
+    struct loader_core_stats *stats = &config->loader_config->stats;
+    printf("Loaded files:%lu packets: %lu bytes: %lu\n", stats->files, stats->packets, stats->bytes);
+
+    printf("tx_ring: %u used / %u avail\n", rte_ring_count(config->tx_ring),
+           rte_ring_free_count(config->tx_ring));
+}
+
+static void print_mbuf_stats(struct stats_config *config) {
+    printf("Mbuf: %u alloc / %u avail\n",
+           rte_mempool_in_use_count(config->mbuf_pool),
+           rte_mempool_avail_count(config->mbuf_pool));
+}
+
+static void print_port_stats(struct stats_config *config, uint16_t port,
+                             int idx) {
     printf("-- PORT %u --\n", port);
     struct rte_eth_stats port_stats;
     rte_eth_stats_get(port, &port_stats);
@@ -82,29 +98,31 @@ static void print_port_stats(struct stats_config *config, uint16_t port, int idx
     for (int i = 0; i < config->nb_tx_cores; i++) {
         // Copy stats
         struct tx_core_config *tx_config = &config->tx_core_config_list[i];
-        if (tx_config->port != port) continue;
+        if (tx_config->port != port)
+            continue;
         struct tx_core_stats stats = tx_config->stats;
         // // Accumulate stats
         // tx_stats.packets += stats.packets;
         // tx_stats.bytes += stats.bytes;
         // tx_stats.drop += stats.drop;
         // Print stats
-        printf("Tx core %u port %u queue %u-%u\n", tx_config->core_id, tx_config->port,
-            tx_config->queue_min, tx_config->queue_min + tx_config->queue_num - 1);
-        printf("\tpackets=%lu\tbytes=%lu\terror=%lu\n",
-            stats.packets, stats.bytes, stats.drop);
+        printf("Tx core %u port %u queue %u-%u\n", tx_config->core_id,
+               tx_config->port, tx_config->queue_min,
+               tx_config->queue_min + tx_config->queue_num - 1);
+        printf("\tpackets=%lu\tbytes=%lu\terror=%lu\n", stats.packets,
+               stats.bytes, stats.drop);
     }
     // // Print accumulated stats
     // printf("Tx core summary\n");
     // printf("\tpackets=%lu\tbytes=%lu\terror=%lu\n",
     //     tx_stats.packets, tx_stats.bytes, tx_stats.drop);
 
-
     if (unlikely(ret)) {
-        fprintf(stderr, "clock_gettime failed on start: %s\n",
-                strerror(errno));
+        fprintf(stderr, "clock_gettime failed on start: %s\n", strerror(errno));
     } else {
-        uint32_t link_speed = config->tx_core_config_list[idx].link_speed;
+        struct rte_eth_link eth_link;
+        rte_eth_link_get_nowait(port, &eth_link);
+        uint32_t link_speed = eth_link.link_speed;
         uint64_t tx_packets = port_stats.opackets - stats_->packets;
         uint64_t tx_bytes = port_stats.obytes - stats_->bytes;
 
@@ -123,26 +141,25 @@ static void print_port_stats(struct stats_config *config, uint16_t port, int idx
         char pps_buf[BUF_LEN];
         char line_rate_buf[BUF_LEN];
         printf("\tspeed\t%spps\t%sBps\tlinerate=%spps\t\n",
-            kilo_format(pps, pps_buf, BUF_LEN),
-            bytes_format(bps),
-            kilo_format(line_rate, line_rate_buf, BUF_LEN));
+               kilo_format(pps, pps_buf, BUF_LEN), bytes_format(bps),
+               kilo_format(line_rate, line_rate_buf, BUF_LEN));
     }
-    printf("\tBuilt-in counters:\n" \
-    "\tTX Successful packets: %lu\n" \
-    "\tTX Successful bytes: %s (avg: %.2lf bytes/pkt)\n" \
-    "\tTX Unsuccessful packets: %lu\n",
-        port_stats.opackets,
-        bytes_format(port_stats.obytes),
-        avg_bytes,
-        port_stats.oerrors);
+    printf("Built-in counters:\n"
+           "\tTX Successful packets: %lu\n"
+           "\tTX Successful bytes: %s (avg: %.2lf bytes/pkt)\n"
+           "\tTX Unsuccessful packets: %lu\n",
+           port_stats.opackets, bytes_format(port_stats.obytes), avg_bytes,
+           port_stats.oerrors);
 }
 
-static void print_stats(struct stats_config *config)
-{
+void stats_print(struct stats_config *config) {
     if (config->watch) {
         printf("\e[1;1H\e[2J");
     }
-    printf("=== Packet burst statistics %c ===\n", ROTATING_CHAR[nb_stat_update++ % 4]);
+    printf("=== Packet burst statistics %c ===\n",
+           ROTATING_CHAR[nb_stat_update++ % 4]);
+    print_loader_stats(config);
+    print_mbuf_stats(config);
     uint16_t port;
     uint16_t port_idx = 0;
     RTE_ETH_FOREACH_DEV(port) {
@@ -153,26 +170,24 @@ static void print_stats(struct stats_config *config)
     printf("===================================\n\n");
 }
 
-
-void start_stats_display(struct stats_config *config)
-{
-    config->stats_ = rte_zmalloc(NULL, sizeof(struct port_stats_) * config->nb_ports, 0);
+void start_stats_display(struct stats_config *config) {
+    config->stats_ =
+        rte_zmalloc(NULL, sizeof(struct port_stats_) * config->nb_ports, 0);
     struct port_stats_ *stats = config->stats_;
     int ret = clock_gettime(CLOCK_MONOTONIC, &stats[0].start);
     if (unlikely(ret)) {
-        fprintf(stderr, "clock_gettime failed on start: %s\n",
-                strerror(errno));
+        fprintf(stderr, "clock_gettime failed on start: %s\n", strerror(errno));
     }
     for (int i = 1; i < config->nb_ports; i++) {
         stats[i].start = stats[0].start;
     }
     for (;;) {
-        if (unlikely(*(config->stop_condition) ||
-            rte_atomic16_read(config->core_counter) == 0)) {
+        if (unlikely(global_stop)) {
             break;
         }
-        print_stats(config);
         rte_delay_ms(config->interval);
+        stats_print(config);
     }
+    stats_print(config);
     rte_free(config->stats_);
 }

@@ -4,6 +4,7 @@
 
 #include <argp.h>
 #include <limits.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -25,6 +26,7 @@
 
 #include <statistics.h>
 #include <tx_core.h>
+#include <loader.h>
 
 #define MAX_PKT_BURST 512
 #define MBUF_CACHE_SIZE 256
@@ -47,6 +49,7 @@
 #define ARG_BITRATE 13
 #define ARG_PKTRATE 14
 #define ARG_WATCH 15
+#define ARG_RING_SIZE 16
 
 #define PORTMASK_DEFAULT 0x1
 #define NB_TX_CORES_DEFAULT 1
@@ -61,6 +64,7 @@
 #define BIRATE_DEFAULT 0
 #define PKTRATE_DEFAULT 0
 #define WATCH_DEFAULT 0
+#define RING_SIZE_DEFAULT 8192
 
 const char *argp_program_version = "pktburst 1.0";
 const char *argp_program_bug_address = "781345688@qq.com";
@@ -82,6 +86,10 @@ static struct argp_option options[] = {
      "Burst size for rx/tx and ring enqueue/dequeue. (default: " STR(
          NB_BURST_SIZE_DEFAULT) ")",
      0},
+    {"ring_size", ARG_BURST_SIZE, "BURST_SIZE", 0,
+     "Burst size for rx/tx and ring enqueue/dequeue. (default: " STR(
+         NB_BURST_SIZE_DEFAULT) ")",
+     0},
     {"mbufs", ARG_NUM_MBUFS, "NUM_MBUFS", 0,
      "Number of mbufs in mempool. (default: " STR(NUM_MBUFS_DEFAULT) "s)", 0},
     {"nbruns", ARG_NB_RUNS, "NB_RUNS", 0,
@@ -90,7 +98,7 @@ static struct argp_option options[] = {
      "Show statistics interval (ms). (default: " STR(
          STATS_INTERVAL_DEFAULT) "). Set to 0 to disable.",
      0},
-    {"pcap", ARG_FILENAME, "FILENAME", 0, "Pcap file name. (required)", 0},
+    // {"pcap", ARG_FILENAME, "FILENAME", 0, "Pcap file name. (required)", 0},
     {"bitrate", ARG_BITRATE, "BITRATE", 0, "Rate limit in Mbps.", 0},
     {"pktrate", ARG_PKTRATE, "PKTRATE", 0, "Rate limit in Mpps.", 0},
     {"watch", ARG_WATCH, 0, 0, "Real time watch.", 0},
@@ -107,10 +115,43 @@ struct arguments {
     uint16_t txq_per_core;
     uint16_t cores_per_port;
     uint16_t burst_size;
+    uint16_t ring_size;
     uint16_t bitrate;
     uint16_t watch;
-    char filename[PATH_MAX];
 };
+
+int parse_pcap_files(char *args, char ***pcap_files,
+                           char **end) {
+    int n = 1;
+    char *p = args;
+    while (*p++) {
+        if (*p == ' ')
+            n++;
+    }
+    char **files = rte_malloc(NULL, sizeof(char *) * n, 0);
+    char *token = strtok_r(args, " ", end);
+
+    int i = 0;
+    while (token != NULL && i < n) {
+        char *s = strdup(token);
+        fprintf(stderr, "%s\n", s);
+        if (s == NULL) {
+            for (int j = 0; j < i; j++) {
+                free(files[i]);
+            }
+            rte_free(files);
+            RTE_LOG(ERR, PKTBURST, "Invalid pcap file '%s'\n", token);
+            return -1;
+        }
+        token = strtok_r(NULL, " ", end);
+        i++;
+    }
+    if (i < n) {
+        rte_realloc(files, sizeof(char *) * i, 0);
+    }
+    *pcap_files = files;
+    return i;
+}
 
 static error_t parse_opt(int key, char *arg, struct argp_state *state) {
     struct arguments *arguments = state->input;
@@ -144,8 +185,8 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
     case ARG_STATISTICS:
         arguments->statistics = strtoul(arg, &end, 10);
         break;
-    case ARG_FILENAME:
-        strncpy(arguments->filename, arg, PATH_MAX - 1);
+    case ARG_RING_SIZE:
+        arguments->ring_size = strtoul(arg, &end, 10);
         break;
     case ARG_NB_RUNS:
         arguments->nbruns = strtoul(arg, &end, 10);
@@ -332,37 +373,31 @@ static int port_init(uint8_t port, uint16_t rx_rings, uint16_t tx_rings,
 
 // ------------------------- Signal Handler -------------------------
 
-static volatile bool should_stop = false;
+rte_atomic32_t global_alloc_counter;
+rte_atomic32_t global_loader_counter;
+volatile bool global_stop = false;
+
 static void signal_handler(int sig) {
     RTE_LOG(NOTICE, PKTBURST, "Caught signal %s on core %u%s\n", strsignal(sig),
             rte_lcore_id(),
             rte_get_main_lcore() == rte_lcore_id() ? " (MASTER CORE)" : "");
-    should_stop = true;
+    global_stop = true;
 }
 
 // ------------------------- Main -------------------------
 
-int load_pcap(const char *filename, struct rte_mempool *pool,
-              struct rte_mbuf **mbufs, int *nb_pkts);
-
-static inline void copy_mbufs(struct rte_mbuf **dst, struct rte_mbuf **src,
-                              int n) {
-    for (int i = 0; i < n; i++) {
-        dst[i] = rte_pktmbuf_copy(src[i], src[i]->pool, 0,
-                                  rte_pktmbuf_pkt_len(src[i]));
-    }
+int lcore_launch(lcore_function_t *f, void *arg, unsigned worker_id) {
+    pthread_t th;
+    return pthread_create(&th, NULL, f, arg);
 }
 
 int main(int argc, char *argv[]) {
     signal(SIGINT, signal_handler);
-    rte_atomic16_t core_counter;
     struct tx_core_config *tx_core_config_list;
     uint16_t nb_ports = 0;
     uint16_t nb_tx_cores = 0;
     unsigned int required_cores;
     struct rte_mempool *mbuf_pool;
-    struct rte_mbuf ***mbufs_list;
-    int nb_pkts = 0;
 
     static struct argp argp = {options, parse_opt, args_doc, doc, 0, 0, 0};
     struct arguments arguments;
@@ -386,10 +421,20 @@ int main(int argc, char *argv[]) {
         .bitrate = BIRATE_DEFAULT,
         .pktrate = PKTRATE_DEFAULT,
         .watch = WATCH_DEFAULT,
+        .ring_size = RING_SIZE_DEFAULT,
     };
-    bzero(arguments.filename, PATH_MAX);
     // parse arguments
-    argp_parse(&argp, argc, argv, 0, 0, &arguments);
+    int arg_index = 0;
+    ret = argp_parse(&argp, argc, argv, 0, &arg_index, &arguments);
+    if (ret < 0) {
+        rte_exit(EXIT_FAILURE, "argp_parse failed\n");
+    }
+
+    char **pcap_files = argv + arg_index;
+    int nb_files = argc - arg_index;
+    if (nb_files < 1) {
+        rte_exit(EXIT_FAILURE, "No pcap files specified\n");
+    }
 
 #if RTE_VERSION >= RTE_VERSION_NUM(17, 5, 0, 16)
     rte_log_set_level(RTE_LOG_DEBUG, RTE_LOG_DEBUG);
@@ -398,9 +443,9 @@ int main(int argc, char *argv[]) {
     rte_set_log_level(RTE_LOG_DEBUG);
 #endif
 
-    if (strlen(arguments.filename) == 0) {
-        rte_exit(EXIT_FAILURE, "Pcap file not specified\n");
-    }
+    // if (strlen(arguments.filename) == 0) {
+    //     rte_exit(EXIT_FAILURE, "Pcap file not specified\n");
+    // }
 
     uint16_t port;
     RTE_ETH_FOREACH_DEV(port) {
@@ -431,20 +476,17 @@ int main(int argc, char *argv[]) {
     if (mbuf_pool == NULL)
         rte_exit(EXIT_FAILURE, "Cannot create mbuf pool\n");
     RTE_LOG(INFO, PKTBURST, "Create MBUF_POOL size=%u\n", arguments.num_mbufs);
-    mbufs_list = rte_malloc(NULL, sizeof(struct rte_mbuf **) * nb_ports, 0);
-    for (int i = 0; i < nb_ports; i++) {
-        mbufs_list[i] = rte_zmalloc(
-            NULL, sizeof(struct rte_mbuf *) * arguments.num_mbufs, 0);
-    }
 
-    ret = load_pcap(arguments.filename, mbuf_pool, mbufs_list[0], &nb_pkts);
-    if (ret < 0) {
-        rte_exit(EXIT_FAILURE, "Failed to load pcap\n");
-    }
+    // static const struct rte_mbuf_dynfield dynfield_desc = {
+	// 	.name = "nbruns",
+	// 	.size = sizeof(uint32_t),
+	// 	.align = sizeof(uint32_t),
+	// };
 
-    for (int i = 1; i < nb_ports; i++) {
-        copy_mbufs(mbufs_list[i], mbufs_list[0], nb_pkts);
-    }
+    // int dynfield_offset = rte_mbuf_dynfield_register(&dynfield_desc);
+    // if (dynfield_offset < 0)
+	// 	rte_exit(EXIT_FAILURE, "Cannot register mbuf field\n");
+    // RTE_LOG(INFO, PKTBURST, "dynfield offset: %d\n", dynfield_offset);
 
     uint16_t nb_txq = arguments.txq_per_core * arguments.cores_per_port;
 
@@ -463,55 +505,58 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    struct rte_ring *tx_ring = rte_ring_create("tx_ring", arguments.ring_size, rte_socket_id(), 0);
+
     // Core index
-    rte_atomic16_init(&core_counter);
+    rte_atomic32_init(&global_alloc_counter);
+    rte_atomic32_init(&global_loader_counter);
     int core_index = rte_get_next_lcore(-1, true, 0);
     int tx_core_idx = 0;
+
+    struct loader_core_config loader_config;
+    memset(&loader_config, 0, sizeof(struct loader_core_config));
+    loader_config.burst_size = arguments.burst_size;
+    // loader_config.dynfield_offset = dynfield_offset;
+    loader_config.nb_files = nb_files;
+    loader_config.pcap_files = pcap_files;
+    loader_config.pool = mbuf_pool;
+    loader_config.ring = tx_ring;
+    loader_config.socket = rte_socket_id();
+    loader_config.nbruns = arguments.nbruns;
+    rte_atomic32_inc(&global_loader_counter);
+    if (lcore_launch(loader_core, &loader_config, 0) < 0) {
+        rte_exit(EXIT_FAILURE, "Could not launch loader core %d.\n", 0);
+    }
+
+    // struct recycler_core_config recycler_config;
+    // memset(&recycler_config, 0, sizeof(struct recycler_core_config));
+    // recycler_config.burst_size = arguments.burst_size;
+    // recycler_config.dynfield_offset = dynfield_offset;
+    // recycler_config.nbruns = arguments.nbruns;
+    // recycler_config.free_ring = free_ring;
+    // recycler_config.pool = mbuf_pool;
+    // recycler_config.repeat_ring = repeat_ring;
+    // recycler_config.socket = rte_socket_id();
+    // if (lcore_launch(recycler_core, &recycler_config, 0) < 0) {
+    //     rte_exit(EXIT_FAILURE, "Could not launch recycler core %d.\n", 0);
+    // }
 
     RTE_ETH_FOREACH_DEV(port) {
         if (!((1ULL << port) & arguments.portmask))
             continue;
 
-        /* Get link status and display it. */
-        struct rte_eth_link eth_link;
-        rte_eth_link_get(port, &eth_link);
-        if (eth_link.link_status) {
-            RTE_LOG(INFO, PKTBURST, "Link up - speed %u Mbps - %s\n",
-                    eth_link.link_speed,
-                    (eth_link.link_duplex == ETH_LINK_FULL_DUPLEX)
-                        ? "full-duplex"
-                        : "half-duplex\n");
-        } else {
-            RTE_LOG(INFO, PKTBURST, "Link down\n");
-        }
-
         uint16_t qid = 0;
-        uint16_t nb_pkts_per_core = nb_pkts / arguments.cores_per_port;
-        struct rte_mbuf **mbufs = mbufs_list[tx_core_idx];
         // Tx Cores
         for (int i = 0; i < arguments.cores_per_port;
              i++, qid += arguments.txq_per_core) {
             // Config core
             struct tx_core_config *config = &tx_core_config_list[tx_core_idx++];
-            config->stop_condition = &should_stop;
-            config->link_speed = eth_link.link_speed;
             config->core_id = core_index;
-            config->pktrate = arguments.pktrate;
-            config->filename = arguments.filename;
-            config->pool = mbuf_pool;
+            config->ring = tx_ring;
             config->port = port;
             config->queue_min = qid;
             config->queue_num = arguments.txq_per_core;
-            config->mbufs = mbufs + i * nb_pkts_per_core;
-            config->nb_pkts = nb_pkts_per_core;
-            if (i == arguments.cores_per_port - 1) {
-                config->nb_pkts = nb_pkts - i * nb_pkts_per_core;
-            }
-            config->nbruns = arguments.nbruns;
-            config->core_counter = &core_counter;
             config->burst_size = arguments.burst_size;
-            config->txd = arguments.txd;
-            rte_atomic16_inc(&core_counter);
 
             for (uint16_t q = config->queue_min;
                  q < config->queue_min + config->queue_num; q++) {
@@ -538,14 +583,15 @@ int main(int argc, char *argv[]) {
 
     if (arguments.statistics > 0) {
         stats_config.tx_core_config_list = tx_core_config_list;
-        stats_config.stop_condition = &should_stop;
         stats_config.portmask = arguments.portmask;
         stats_config.txq = nb_txq;
         stats_config.nb_tx_cores = nb_tx_cores;
         stats_config.nb_ports = nb_ports;
         stats_config.interval = arguments.statistics;
-        stats_config.core_counter = &core_counter;
         stats_config.watch = arguments.watch;
+        stats_config.loader_config = &loader_config;
+        stats_config.tx_ring = tx_ring;
+        stats_config.mbuf_pool = mbuf_pool;
         start_stats_display(&stats_config);
     }
 
@@ -554,11 +600,7 @@ int main(int argc, char *argv[]) {
     rte_eal_mp_wait_lcore();
 
     // Finalize
-    for (int i = 0; i < nb_ports; i++) {
-        rte_pktmbuf_free_bulk(mbufs_list[i], nb_pkts);
-        rte_free(mbufs_list[i]);
-    }
-    rte_free(mbufs_list);
+    rte_ring_free(tx_ring);
     rte_free(tx_core_config_list);
     rte_mempool_free(mbuf_pool);
     rte_eal_cleanup();
