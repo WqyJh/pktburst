@@ -55,6 +55,7 @@ add_executable(pktburst
     src/tx_core.c
     src/statistics.c
     src/loader.c
+    src/common.c
 )
 target_link_libraries(pktburst ${LIBRARIES})
 

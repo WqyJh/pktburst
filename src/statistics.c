@@ -10,9 +10,9 @@
 #include <rte_malloc.h>
 
 #include <common.h>
+#include <loader.h>
 #include <statistics.h>
 #include <tx_core.h>
-#include <loader.h>
 
 #ifdef CLOCK_MONOTONIC_RAW /* Defined in glibc bits/time.h */
 #define CLOCK_TYPE_ID CLOCK_MONOTONIC_RAW
@@ -69,14 +69,16 @@ double timespec_diff_to_double(const struct timespec start,
 }
 
 static void print_loader_stats(struct stats_config *config) {
-    struct loader_core_stats *stats = &config->loader_config->stats;
-    printf("Loaded files:%lu packets: %lu bytes: %lu\n", stats->files, stats->packets, stats->bytes);
+    struct loader_core_stats *stats = config->loader_core_stats;
 
-    printf("tx_ring: %u used / %u avail\n", rte_ring_count(config->tx_ring),
-           rte_ring_free_count(config->tx_ring));
+    printf("Loaded files:%d packets: %lu bytes: %lu\n",
+           rte_atomic32_read(&stats->files), rte_atomic64_read(&stats->packets),
+           rte_atomic64_read(&stats->bytes));
 }
 
 static void print_mbuf_stats(struct stats_config *config) {
+    printf("tx_ring: %u used / %u avail\n", rte_ring_count(config->tx_ring),
+           rte_ring_free_count(config->tx_ring));
     printf("Mbuf: %u alloc / %u avail\n",
            rte_mempool_in_use_count(config->mbuf_pool),
            rte_mempool_avail_count(config->mbuf_pool));

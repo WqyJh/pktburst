@@ -19,11 +19,12 @@ struct port_stats_ {
 
 struct stats_config {
     struct tx_core_config *tx_core_config_list;
-    struct loader_core_config *loader_config;
+    struct loader_core_stats *loader_core_stats;
     struct rte_ring *tx_ring;
     struct rte_mempool *mbuf_pool;
     uint64_t portmask;
     uint64_t interval;
+    int nb_loaders;
     uint16_t txq;
     uint16_t nb_tx_cores;
     uint16_t nb_ports;
