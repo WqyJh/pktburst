@@ -56,6 +56,7 @@ add_executable(pktburst
     src/statistics.c
     src/loader.c
     src/common.c
+    src/allocator.c
 )
 target_link_libraries(pktburst ${LIBRARIES})
 

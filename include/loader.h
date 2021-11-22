@@ -28,6 +28,8 @@ struct loader_core_config {
     uint16_t off_;
     pthread_t th;
     cpu_set_t *cpuset;
+    struct ring_pair *ring_pairs;
+    struct ring_pair *ring_pairs_;
     struct loader_core_stats *stats;
 };
 

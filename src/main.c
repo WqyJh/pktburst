@@ -5,8 +5,10 @@
 #include <argp.h>
 #include <limits.h>
 #include <pthread.h>
+#include <rte_ring_core.h>
 #include <signal.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -415,6 +417,8 @@ int main(int argc, char *argv[]) {
     signal(SIGINT, signal_handler);
     struct tx_core_config *tx_core_config_list;
     struct loader_core_config *loader_core_config_list;
+    struct ring_pair *alloc_ring_pairs;
+    struct ring_pair *load_ring_pairs;
     uint16_t nb_ports = 0;
     uint16_t nb_tx_cores = 0;
     unsigned int required_cores;
@@ -585,6 +589,23 @@ int main(int argc, char *argv[]) {
     rte_atomic64_init(&loader_stats.bytes);
     rte_atomic64_init(&loader_stats.packets);
     rte_atomic32_init(&loader_stats.files);
+    uint32_t nb_loaders = arguments.nb_loaders * nb_files;
+    alloc_ring_pairs = rte_zmalloc_socket(NULL, nb_loaders * sizeof(struct ring_pair), 0, rte_socket_id());
+    load_ring_pairs = rte_zmalloc_socket(NULL, nb_loaders * sizeof(struct ring_pair), 0, rte_socket_id());
+    char ring_name[RTE_RING_NAMESIZE];
+    for (int i = 0; i < nb_loaders; i++) {
+        struct ring_pair *alloc_ring = &alloc_ring_pairs[i];
+        snprintf(ring_name, RTE_RING_NAMESIZE, "alloc_ring_%d", i);
+        alloc_ring->peer_alive = rte_zmalloc_socket(NULL, sizeof(bool), 0, rte_socket_id());
+        *alloc_ring->peer_alive = true;
+        alloc_ring->ring = rte_ring_create(ring_name, arguments.ring_size, rte_socket_id(), 0);
+
+        struct ring_pair *load_ring = &load_ring_pairs[i];
+        snprintf(ring_name, RTE_RING_NAMESIZE, "load_ring_%d", i);
+        load_ring->peer_alive = rte_zmalloc_socket(NULL, sizeof(bool), 0, rte_socket_id());
+        *load_ring->peer_alive = true;
+        load_ring->ring = rte_ring_create(ring_name, arguments.ring_size, rte_socket_id(), 0);
+    }
 
     for (int i = 0; i < nb_files; i++) {
         uint32_t runstart = 0;
@@ -602,6 +623,7 @@ int main(int argc, char *argv[]) {
             config->ring = tx_ring;
             config->socket = rte_socket_id();
             config->runstart = runstart;
+            config->ring_pairs = load_ring_pairs;
             if (j == arguments.nb_loaders - 1) {
                 config->nbruns = arguments.nbruns - runstart;
             } else {
