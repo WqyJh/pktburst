@@ -8,6 +8,7 @@ project(pktburst)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_definitions(-march=native)
+# add_definitions(MIX_FLOW)
 
 if (NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Debug")

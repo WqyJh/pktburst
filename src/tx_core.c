@@ -39,6 +39,9 @@ static inline void extend_packets(struct tx_core_config *config)
     uint32_t old_nb_pkts = config->nb_pkts;
     uint32_t nb_pkts_ = config->nb_pkts * batch;
     struct rte_mbuf **mbufs = rte_malloc(NULL, sizeof(struct rte_mbuf *) * nb_pkts_, 0);
+#ifdef MIX_FLOW
+    struct rte_mbuf **mbufs2 = rte_malloc(NULL, sizeof(struct rte_mbuf *) * nb_pkts_, 0);
+#endif // !MIX_FLOW
     struct rte_mempool *pool = config->mbufs[0]->pool;
     rte_memcpy(mbufs, config->mbufs, sizeof(struct rte_mbuf *) * old_nb_pkts);
     for (int i = 1; i < batch; i++) {
@@ -49,9 +52,22 @@ static inline void extend_packets(struct tx_core_config *config)
             mbufs[i * old_nb_pkts + j] = mbuf;
         }
     }
+#ifdef MIX_FLOW
+    int k = 0;
+    for (int j = 0; j < old_nb_pkts; j++) {
+        for (int i = 0; i < batch; i++) {
+            mbufs2[k++] = mbufs[i * old_nb_pkts + j];
+        }
+    }
+#endif // !MIX_FLOW
     config->batch_ = batch;
     config->nb_pkts_ = nb_pkts_;
+#ifdef MIX_FLOW
+    config->mbufs_ = mbufs2;
+    rte_free(mbufs);
+#else // !MIX_FLOW
     config->mbufs_ = mbufs;
+#endif // !MIX_FLOW
 }
 
 static inline void restore_extended_packets(struct tx_core_config *config)
